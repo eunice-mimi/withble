@@ -179,18 +179,13 @@ h1,h2,h3,h4,p{margin:0}
 .book:hover{border-color:var(--ink)}
 .book b{font-weight:600;font-size:14px;line-height:20px}
 .book small{font-size:12px;line-height:16px;color:var(--muted)}
-.book.has{background:var(--ink);border-color:var(--ink);color:var(--on-ink)}
-.book.has small{color:inherit;opacity:.7}
 .ch-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-2)}
 .ch{height:52px;border-radius:var(--radius-base);border:var(--border-hairline) solid var(--line);text-align:center;font-weight:600}
 .ch:hover{border-color:var(--ink)}
-.ch.has{background:var(--ink);color:var(--on-ink);border-color:var(--ink);font-weight:700}
 .ch.cur{outline:var(--border-strong) solid var(--ink);outline-offset:2px}
 .quick{display:flex;gap:var(--space-2);overflow-x:auto;margin:var(--space-4) calc(-1 * var(--margin-screen)) 0;padding:0 var(--margin-screen) var(--space-1)}
 .quick .chip{flex:none}
 .hint{font-size:13px;line-height:20px;color:var(--muted);margin-top:var(--space-3)}
-.legend{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--muted);margin:0 0 var(--space-3)}
-.legend i{width:10px;height:10px;border-radius:var(--radius-xs);background:var(--ink);display:inline-block}
 
 .reader-head{display:flex;align-items:baseline;justify-content:space-between;margin:var(--space-4) 0 var(--space-6);padding-bottom:var(--space-4);border-bottom:var(--border-hairline) solid var(--ink)}
 .reader-head h2{font-size:28px;line-height:36px;font-weight:800;letter-spacing:-0.03em}
@@ -203,7 +198,7 @@ h1,h2,h3,h4,p{margin:0}
 .v.sel .vn{color:var(--on-ink);opacity:.7}
 .v.flash{animation:flash 1.6s ease}
 @keyframes flash{0%,40%{background:var(--hl)}}
-.partial{font-size:13px;line-height:20px;color:var(--muted);margin-top:var(--space-6);padding:var(--space-3) var(--space-4);border-radius:var(--radius-base);background:var(--surface-sunken)}
+.psalm-title{font-size:13px;line-height:20px;color:var(--muted);margin:calc(-1 * var(--space-2)) 0 var(--space-4)}
 .ch-nav{display:flex;gap:var(--space-3);margin-top:var(--space-8)}
 .ch-nav .btn{flex:1;padding:0 var(--space-3);font-size:14px}
 
@@ -398,7 +393,7 @@ async function loadBible(){
   const d=await res.json();
   d.books.forEach((chs,b)=>chs.forEach((v,i)=>{const k=b+'-'+(i+1);TEXT[k]={v};if(d.titles[k])TEXT[k].title=d.titles[k];}));
 }
-const AVAILABLE=[[PSA,23],[JHN,3],[JHN,15],[MAT,5]];
+const FEATURED=[[PSA,23],[JHN,3],[JHN,15],[MAT,5]];
 const TODAY_REF={b:PSA,c:23,vs:[1]};
 const PRESETS=[{b:PSA,c:23,vs:[1]},{b:JHN,c:3,vs:[16]},{b:JHN,c:15,vs:[5]},{b:JHN,c:15,vs:[12]},{b:MAT,c:5,vs:[14]}];
 
@@ -555,30 +550,24 @@ SC.books=()=>{
   const list=BOOKS.map((b,i)=>Object.assign({i},b)).filter(b=>b.t===UI.testament);
   return hdr('성경',{back:false,right:'<span class="badge lock" style="margin-right:6px">개역한글</span>'})+
   '<div class="scroll"><button class="searchbox" data-a="openSearch">'+ic('search')+'<span>말씀 검색 (예: 사랑, 목자, 빛)</span></button>'+
-  '<div class="quick">'+AVAILABLE.map(([b,c])=>'<button class="chip" data-a="openReader" data-b="'+b+'" data-c="'+c+'">'+BOOKS[b].name+' '+chName(b,c)+'</button>').join('')+'</div>'+
+  '<div class="quick">'+FEATURED.map(([b,c])=>'<button class="chip" data-a="openReader" data-b="'+b+'" data-c="'+c+'">'+BOOKS[b].name+' '+chName(b,c)+'</button>').join('')+'</div>'+
   '<div class="seg" role="tablist"><button class="'+(UI.testament==='ot'?'on':'')+'" data-a="testament" data-t="ot" role="tab" aria-selected="'+(UI.testament==='ot')+'">구약 39권</button><button class="'+(UI.testament==='nt'?'on':'')+'" data-a="testament" data-t="nt" role="tab" aria-selected="'+(UI.testament==='nt')+'">신약 27권</button></div>'+
-  '<p class="legend"><i></i>프로토타입에 본문이 담긴 책</p>'+
-  '<div class="book-grid">'+list.map(b=>'<button class="book'+(AVAILABLE.some(a=>a[0]===b.i)?' has':'')+'" data-a="openBook" data-b="'+b.i+'"><b>'+b.name+'</b><small>'+b.ch+(b.i===PSA?'편':'장')+'</small></button>').join('')+'</div></div>';
+  '<div class="book-grid">'+list.map(b=>'<button class="book" data-a="openBook" data-b="'+b.i+'"><b>'+b.name+'</b><small>'+b.ch+(b.i===PSA?'편':'장')+'</small></button>').join('')+'</div></div>';
 };
 
 SC.chapters=r=>{
   const b=BOOKS[r.b];const lr=S.lastRead;let h='';
-  for(let c=1;c<=b.ch;c++){const has=!!TEXT[r.b+'-'+c];h+='<button class="ch'+(has?' has':'')+(lr.b===r.b&&lr.c===c?' cur':'')+'" data-a="openReader" data-b="'+r.b+'" data-c="'+c+'" aria-label="'+chName(r.b,c)+(has?' (본문 있음)':'')+'">'+c+'</button>';}
-  return hdr(b.name,{sub:b.ch+(r.b===PSA?'편':'장')+' · 장을 선택하세요'})+'<div class="scroll"><p class="legend"><i></i>본문이 담긴 장</p><div class="ch-grid">'+h+'</div></div>';
+  for(let c=1;c<=b.ch;c++){h+='<button class="ch'+(lr.b===r.b&&lr.c===c?' cur':'')+'" data-a="openReader" data-b="'+r.b+'" data-c="'+c+'" aria-label="'+chName(r.b,c)+'">'+c+'</button>';}
+  return hdr(b.name,{sub:b.ch+(r.b===PSA?'편':'장')+' · 장을 선택하세요'})+'<div class="scroll"><div class="ch-grid">'+h+'</div></div>';
 };
 
 SC.reader=r=>{
   const b=BOOKS[r.b],t=TEXT[r.b+'-'+r.c];
   const right='<button class="icon-btn" data-a="openSearch" aria-label="검색">'+ic('search')+'</button><button class="icon-btn" data-a="openChapters" data-b="'+r.b+'" aria-label="장 선택">'+ic('book')+'</button>';
-  let body;
-  if(t){
-    body='<div class="reader-head"><h2>'+b.name+' '+chName(r.b,r.c)+'</h2><span>개역한글</span></div><div class="chapter">'+
+  let body='<div class="reader-head"><h2>'+b.name+' '+chName(r.b,r.c)+'</h2><span>개역한글</span></div>'+
+    (t.title?'<p class="psalm-title">'+esc(t.title)+'</p>':'')+'<div class="chapter">'+
     t.v.map((x,i)=>{const v=i+1,k=keyOf(r.b,r.c,v);return '<p class="v'+(isHl(k)?' hl':'')+(UI.sel.has(v)?' sel':'')+'" id="v-'+v+'" data-a="tapVerse" data-v="'+v+'" role="button" tabindex="0" aria-pressed="'+UI.sel.has(v)+'"><span class="vn">'+v+'</span>'+esc(x)+'</p>';}).join('')+'</div>'+
-    (t.partial?'<p class="partial">프로토타입에는 '+t.partial+'만 담겨 있어요.</p>':'')+
     '<p class="hint">구절을 누르면 선택돼요. 여러 절을 함께 선택할 수 있어요.</p>';
-  }else{
-    body='<div class="reader-head"><h2>'+b.name+' '+chName(r.b,r.c)+'</h2><span>개역한글</span></div><div class="empty"><div class="em"></div><h4>이 장은 아직 프로토타입에 담기지 않았어요</h4><p>아래 본문으로 읽기·선택·묵상 흐름을 체험해보세요.</p><div class="chips" style="justify-content:center">'+AVAILABLE.map(([bb,cc])=>'<button class="chip" data-a="replaceReader" data-b="'+bb+'" data-c="'+cc+'">'+BOOKS[bb].name+' '+chName(bb,cc)+'</button>').join('')+'</div></div>';
-  }
   const pv=stepCh(r.b,r.c,-1),nx=stepCh(r.b,r.c,1);
   body+='<div class="ch-nav"><button class="btn btn-ghost" data-a="prevCh">'+ic('left')+(pv?BOOKS[pv.b].name.slice(0,4)+' '+pv.c:'처음')+'</button><button class="btn btn-ghost" data-a="nextCh">'+(nx?BOOKS[nx.b].name.slice(0,4)+' '+nx.c:'끝')+ic('right')+'</button></div>';
   return hdr(b.name+' '+chName(r.b,r.c),{right})+'<div class="scroll pad-ab" id="readerScroll">'+body+'</div>';
@@ -588,7 +577,7 @@ function stepCh(b,c,d){c+=d;if(c<1){if(b===0)return null;b--;c=BOOKS[b].ch;}else
 SC.search=()=>hdr('말씀 검색')+'<div class="scroll"><input class="input" id="searchInput" type="search" placeholder="단어나 책 이름을 입력하세요" value="'+esc(UI.q)+'" autocomplete="off" aria-label="검색어"><div id="searchResults">'+searchResults()+'</div></div>';
 function searchResults(){
   const q=UI.q.trim();
-  if(!q)return '<p class="hint" style="margin:16px 0 10px">추천 검색어</p><div class="chips">'+['사랑','목자','포도나무','빛','영생'].map(w=>'<button class="chip" data-a="searchWord" data-w="'+w+'">'+w+'</button>').join('')+'</div><p class="hint" style="margin-top:18px">프로토타입에서는 시편 23편, 요한복음 3·15장, 마태복음 5장 안에서 검색해요.</p>';
+  if(!q)return '<p class="hint" style="margin:16px 0 10px">추천 검색어</p><div class="chips">'+['사랑','목자','포도나무','빛','영생'].map(w=>'<button class="chip" data-a="searchWord" data-w="'+w+'">'+w+'</button>').join('')+'</div><p class="hint" style="margin-top:18px">개역한글 성경 66권 전체에서 검색해요.</p>';
   const books=BOOKS.map((b,i)=>Object.assign({i},b)).filter(b=>b.name.includes(q));
   const res=[];for(const k in TEXT){const[b,c]=k.split('-').map(Number);TEXT[k].v.forEach((t,i)=>{if(t.includes(q))res.push({b,c,v:i+1,t});});}
   const mark=t=>esc(t).split(esc(q)).join('<mark style="background:var(--yellow);color:inherit">'+esc(q)+'</mark>');
@@ -822,7 +811,6 @@ const A={
   openBook(d){go('chapters',{b:+d.b});},
   openChapters(d){const i=UI.stack.length-2;if(i>=0&&UI.stack[i].name==='chapters'&&UI.stack[i].b===+d.b){back();return;}go('chapters',{b:+d.b});},
   openReader(d){go('reader',{b:+d.b,c:+d.c,focus:d.v?+d.v:null});},
-  replaceReader(d){replace('reader',{b:+d.b,c:+d.c});},
   continueRead(){const l=S.lastRead;UI.tab='bible';UI.stack=[{name:'books'},{name:'reader',b:l.b,c:l.c,restore:true}];UI.sel.clear();render();},
   prevCh(){const r=cur();const n=stepCh(r.b,r.c,-1);if(!n){toast('성경의 첫 장이에요');return;}replace('reader',n);},
   nextCh(){const r=cur();const n=stepCh(r.b,r.c,1);if(!n){toast('성경의 마지막 장이에요');return;}replace('reader',n);},
@@ -907,7 +895,7 @@ const A={
   toggleNotify(){S.settings.notify=!S.settings.notify;save();render(false);toast(S.settings.notify?'알림을 켰어요':'알림을 껐어요');},
   defVis(){modal({title:'공개범위 기본 설정',body:'<p class="muted">새 묵상·기도를 쓸 때 처음 선택될 공개범위예요. 글마다 바꿀 수 있어요.</p><div class="targets">'+[['private','나만 보기 (권장)'],...S.groups.map(g=>[g.id,g.name])].map(([v,l])=>'<label class="target"><input type="radio" name="dv" value="'+v+'" '+(S.settings.defVis===v?'checked':'')+'><span>'+esc(l)+'</span></label>').join('')+'</div>',
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{S.settings.defVis=document.querySelector('input[name=dv]:checked').value;save();render(false);toast('기본 공개범위를 저장했어요');}}]});},
-  serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">프로토타입 v0.1 · 성경 본문 개역한글(일부 장 수록)<br>모든 기록은 이 브라우저에만 저장되며, 카카오 로그인·공유·초대는 시뮬레이션이에요.</p>',actions:[{label:'닫기',kind:'primary'}]});},
+  serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">프로토타입 v0.1 · 성경 본문 개역한글(66권 전체)<br>모든 기록은 이 브라우저에만 저장되며, 카카오 로그인·공유·초대는 시뮬레이션이에요.</p>',actions:[{label:'닫기',kind:'primary'}]});},
   editProfile(){modal({title:'프로필 편집',body:'<div class="field" style="margin-top:6px"><label for="pfName">이름</label><input class="input" id="pfName" maxlength="12" value="'+esc(S.user.name)+'"></div><div class="field"><label for="pfBio">한 줄 소개</label><input class="input" id="pfBio" maxlength="30" value="'+esc(S.user.bio)+'"></div>',
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}S.user.name=n;S.user.bio=$('#pfBio').value.trim()||'말씀으로 함께 걷는 중 ';save();render(false);toast('프로필을 저장했어요');}}]});},
   resetAll(){confirmModal('테스트 데이터를 초기화할까요?','작성한 묵상·기도·모임이 모두 지워지고 처음 상태로 돌아가요.','초기화',()=>{try{localStorage.removeItem(LS);}catch(e){}S=seed();save();Object.assign(UI,{stack:[{name:'home'}],tab:'home',recTab:'med',pf:'all',gTab:'home',gpf:'all',q:'',invited:false});UI.sel.clear();render();toast('테스트 데이터를 초기화했어요');});},
