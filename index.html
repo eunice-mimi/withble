@@ -575,6 +575,7 @@ SC.reader=r=>{
 function stepCh(b,c,d){c+=d;if(c<1){if(b===0)return null;b--;c=BOOKS[b].ch;}else if(c>BOOKS[b].ch){if(b===BOOKS.length-1)return null;b++;c=1;}return{b,c};}
 
 SC.search=()=>hdr('말씀 검색')+'<div class="scroll"><input class="input" id="searchInput" type="search" placeholder="단어나 책 이름을 입력하세요" value="'+esc(UI.q)+'" autocomplete="off" aria-label="검색어"><div id="searchResults">'+searchResults()+'</div></div>';
+const SEARCH_MAX=100; // 결과가 많으면 화면 그리기가 느려져서 앞의 100개만 보여줌
 function searchResults(){
   const q=UI.q.trim();
   if(!q)return '<p class="hint" style="margin:16px 0 10px">추천 검색어</p><div class="chips">'+['사랑','목자','포도나무','빛','영생'].map(w=>'<button class="chip" data-a="searchWord" data-w="'+w+'">'+w+'</button>').join('')+'</div><p class="hint" style="margin-top:18px">개역한글 성경 66권 전체에서 검색해요.</p>';
@@ -583,8 +584,9 @@ function searchResults(){
   const mark=t=>esc(t).split(esc(q)).join('<mark style="background:var(--yellow);color:inherit">'+esc(q)+'</mark>');
   let h='';
   if(books.length)h+='<h3 class="sec">책</h3><div class="chips">'+books.map(b=>'<button class="chip" data-a="openBook" data-b="'+b.i+'">'+b.name+'</button>').join('')+'</div>';
-  h+='<h3 class="sec">구절 <span class="sec-sub">'+res.length+'개</span></h3>';
-  h+=res.length?res.map(x=>'<div class="vrow"><div class="vr-main" data-a="openReader" data-b="'+x.b+'" data-c="'+x.c+'" data-v="'+x.v+'" role="button" tabindex="0"><p class="vr-ref">'+BOOKS[x.b].name+' '+x.c+':'+x.v+'</p><p class="vr-text">'+mark(x.t)+'</p></div></div>').join(''):'<p class="hint">‘'+esc(q)+'’이(가) 들어간 구절을 찾지 못했어요. 다른 단어로 검색해보세요.</p>';
+  h+='<h3 class="sec">구절 <span class="sec-sub">'+res.length.toLocaleString()+'개</span></h3>';
+  h+=res.length?res.slice(0,SEARCH_MAX).map(x=>'<div class="vrow"><div class="vr-main" data-a="openReader" data-b="'+x.b+'" data-c="'+x.c+'" data-v="'+x.v+'" role="button" tabindex="0"><p class="vr-ref">'+BOOKS[x.b].name+' '+x.c+':'+x.v+'</p><p class="vr-text">'+mark(x.t)+'</p></div></div>').join(''):'<p class="hint">‘'+esc(q)+'’이(가) 들어간 구절을 찾지 못했어요. 다른 단어로 검색해보세요.</p>';
+  if(res.length>SEARCH_MAX)h+='<p class="hint">앞의 '+SEARCH_MAX+'개만 보여드려요. 단어를 더 길게 입력하면 좁혀서 찾을 수 있어요.</p>';
   return h;
 }
 
