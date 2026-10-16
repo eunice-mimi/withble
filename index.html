@@ -568,7 +568,7 @@ SC.reader=r=>{
   let body='<div class="reader-head"><h2>'+b.name+' '+chName(r.b,r.c)+'</h2><span>개역한글</span></div>'+
     (t.title?'<p class="psalm-title">'+esc(t.title)+'</p>':'')+'<div class="chapter">'+
     t.v.map((x,i)=>{const v=i+1,k=keyOf(r.b,r.c,v);return '<p class="v'+(isHl(k)?' hl':'')+(UI.sel.has(v)?' sel':'')+'" id="v-'+v+'" data-a="tapVerse" data-v="'+v+'" role="button" tabindex="0" aria-pressed="'+UI.sel.has(v)+'"><span class="vn">'+v+'</span><span class="vt">'+esc(x)+'</span></p>';}).join('')+'</div>'+
-    '<p class="hint">구절을 누르면 선택돼요. 여러 절을 함께 선택할 수 있어요.</p>';
+    '<p class="hint">시작 절과 끝 절을 차례로 누르면 그 사이가 모두 선택돼요.</p>';
   const pv=stepCh(r.b,r.c,-1),nx=stepCh(r.b,r.c,1);
   body+='<div class="ch-nav"><button class="btn btn-ghost" data-a="prevCh">'+ic('left')+(pv?BOOKS[pv.b].name.slice(0,4)+' '+pv.c:'처음')+'</button><button class="btn btn-ghost" data-a="nextCh">'+(nx?BOOKS[nx.b].name.slice(0,4)+' '+nx.c:'끝')+ic('right')+'</button></div>';
   return hdr(b.name+' '+chName(r.b,r.c),{right})+'<div class="scroll pad-ab" id="readerScroll">'+body+'</div>';
@@ -819,7 +819,13 @@ const A={
   nextCh(){const r=cur();const n=stepCh(r.b,r.c,1);if(!n){toast('성경의 마지막 장이에요');return;}replace('reader',n);},
   openSearch(){go('search');},
   searchWord(d){UI.q=d.w;const i=$('#searchInput');if(i)i.value=d.w;$('#searchResults').innerHTML=searchResults();},
-  tapVerse(d,el){const v=+d.v;if(UI.sel.has(v))UI.sel.delete(v);else UI.sel.add(v);el.classList.toggle('sel',UI.sel.has(v));el.setAttribute('aria-pressed',UI.sel.has(v));renderActionBar();},
+  // 달력 기간 선택처럼: 첫 탭=시작 절, 다른 절 탭=사이 전체 선택, 범위가 있을 때 탭=새로 시작
+  tapVerse(d){const v=+d.v;
+    if(UI.sel.size===1&&!UI.sel.has(v)){const a=[...UI.sel][0];UI.sel.clear();for(let i=Math.min(a,v);i<=Math.max(a,v);i++)UI.sel.add(i);}
+    else if(UI.sel.size===1)UI.sel.clear();
+    else{UI.sel.clear();UI.sel.add(v);}
+    document.querySelectorAll('.chapter .v').forEach(p=>{const on=UI.sel.has(+p.dataset.v);p.classList.toggle('sel',on);p.setAttribute('aria-pressed',on);});
+    renderActionBar();},
   clearSel(){UI.sel.clear();document.querySelectorAll('.v.sel').forEach(e=>{e.classList.remove('sel');e.setAttribute('aria-pressed','false');});renderActionBar();},
   selHighlight(){const r=cur();const keys=[...UI.sel].map(v=>keyOf(r.b,r.c,v));const all=keys.every(isHl);
     if(all){S.highlights=S.highlights.filter(h=>!keys.includes(h.k));toast('하이라이트를 해제했어요');}
