@@ -193,7 +193,8 @@ h1,h2,h3,h4,p{margin:0}
 .chapter{font-family:var(--font-serif);font-size:19px;line-height:34px}
 .v{margin:0 calc(-1 * var(--space-2));padding:var(--space-1) var(--space-2);border-radius:var(--radius-base);cursor:pointer;transition:background-color .12s,color .12s;-webkit-tap-highlight-color:transparent}
 .vn{font-family:var(--font-sans);font-size:11px;font-weight:700;color:var(--muted);margin-right:var(--space-2);position:relative;top:-.4em}
-.v.hl{background:linear-gradient(transparent 58%,var(--hl) 58%)}
+.v.hl .vt{background:var(--hl);-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.v.sel .vt{background:none}
 .v.sel{background:var(--ink);color:var(--on-ink)}
 .v.sel .vn{color:var(--on-ink);opacity:.7}
 .v.flash{animation:flash 1.6s ease}
@@ -255,7 +256,7 @@ h1,h2,h3,h4,p{margin:0}
 .vrow .vr-main{flex:1;cursor:pointer;min-width:0}
 .vrow .vr-ref{font-size:12px;line-height:16px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
 .vrow .vr-text{font-family:var(--font-serif);font-size:16px;line-height:28px;margin-top:var(--space-1)}
-.vrow.hlrow .vr-text{background:linear-gradient(transparent 58%,var(--hl) 58%);display:inline}
+.vrow.hlrow .vr-text{background:var(--hl);-webkit-box-decoration-break:clone;box-decoration-break:clone;display:inline}
 .vrow .icon-btn{color:var(--muted);margin-top:-10px;margin-right:-10px}
 
 .empty{text-align:center;padding:var(--space-12) var(--space-2) var(--space-6)}
@@ -566,7 +567,7 @@ SC.reader=r=>{
   const right='<button class="icon-btn" data-a="openSearch" aria-label="검색">'+ic('search')+'</button><button class="icon-btn" data-a="openChapters" data-b="'+r.b+'" aria-label="장 선택">'+ic('book')+'</button>';
   let body='<div class="reader-head"><h2>'+b.name+' '+chName(r.b,r.c)+'</h2><span>개역한글</span></div>'+
     (t.title?'<p class="psalm-title">'+esc(t.title)+'</p>':'')+'<div class="chapter">'+
-    t.v.map((x,i)=>{const v=i+1,k=keyOf(r.b,r.c,v);return '<p class="v'+(isHl(k)?' hl':'')+(UI.sel.has(v)?' sel':'')+'" id="v-'+v+'" data-a="tapVerse" data-v="'+v+'" role="button" tabindex="0" aria-pressed="'+UI.sel.has(v)+'"><span class="vn">'+v+'</span>'+esc(x)+'</p>';}).join('')+'</div>'+
+    t.v.map((x,i)=>{const v=i+1,k=keyOf(r.b,r.c,v);return '<p class="v'+(isHl(k)?' hl':'')+(UI.sel.has(v)?' sel':'')+'" id="v-'+v+'" data-a="tapVerse" data-v="'+v+'" role="button" tabindex="0" aria-pressed="'+UI.sel.has(v)+'"><span class="vn">'+v+'</span><span class="vt">'+esc(x)+'</span></p>';}).join('')+'</div>'+
     '<p class="hint">구절을 누르면 선택돼요. 여러 절을 함께 선택할 수 있어요.</p>';
   const pv=stepCh(r.b,r.c,-1),nx=stepCh(r.b,r.c,1);
   body+='<div class="ch-nav"><button class="btn btn-ghost" data-a="prevCh">'+ic('left')+(pv?BOOKS[pv.b].name.slice(0,4)+' '+pv.c:'처음')+'</button><button class="btn btn-ghost" data-a="nextCh">'+(nx?BOOKS[nx.b].name.slice(0,4)+' '+nx.c:'끝')+ic('right')+'</button></div>';
