@@ -339,6 +339,14 @@ h1,h2,h3,h4,p{margin:0}
 .login-verse cite{display:block;font-style:normal;font-family:var(--font-sans);font-size:12px;margin-top:var(--space-2)}
 .login .btn-kakao{height:var(--control-lg)}
 .login .proto-note{color:inherit;opacity:.6}
+.agree-all{display:flex;align-items:center;gap:var(--space-3);min-height:var(--control-lg);padding:0 var(--space-4);border-radius:var(--radius-base);background:var(--surface-sunken);font-weight:700;margin-top:var(--space-6);cursor:pointer}
+.agree-row{display:flex;align-items:center;gap:var(--space-2);border-bottom:var(--border-hairline) solid var(--line);padding:0 var(--space-4)}
+.agree-row label{flex:1;display:flex;align-items:center;gap:var(--space-3);min-height:var(--control-md);cursor:pointer;font-size:14px;line-height:20px}
+.agree-all input,.agree-row input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--ink)}
+.agree-row .req{font-weight:700;color:var(--muted)}
+.agree-more{min-height:44px;padding:0 var(--space-1);font-size:13px;color:var(--muted);text-decoration:underline}
+.agree-note{margin-top:var(--space-6);font-size:13px;line-height:20px}
+.agree-link{color:var(--ink);text-decoration:underline}
 
 /* overlays */
 .toast{position:absolute;left:50%;bottom:92px;transform:translate(-50%,10px);background:var(--ink);color:var(--on-ink);padding:var(--space-3) var(--space-4);border-radius:var(--radius-base);font-size:14px;line-height:20px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;max-width:calc(100% - 48px);width:max-content;text-align:center;border:var(--border-hairline) solid var(--line)}
@@ -413,14 +421,29 @@ async function initAuth(){
   const justSignedIn=q.has('code');
   try{
     const {data:{session}}=await sb.auth.getSession();
-    S.loggedIn=!!session;
-    if(session)await loadProfile(session.user.id);
-  }catch(e){S.loggedIn=false;}
+    S.loggedIn=!!session;S.needsConsent=false;
+    if(session){await loadProfile(session.user.id);S.needsConsent=!(await hasConsent());}
+  }catch(e){S.loggedIn=false;S.needsConsent=false;}
   save();
   if(justSignedIn||err)history.replaceState(null,'',location.pathname);
   if(err)setTimeout(()=>toast('카카오 로그인에 실패했어요: '+err),0);
-  else if(justSignedIn&&S.loggedIn)setTimeout(()=>toast(S.user.name+'님, 환영해요'),0);
-  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S.loggedIn=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
+  else if(justSignedIn&&S.loggedIn&&!S.needsConsent)setTimeout(()=>toast(S.user.name+'님, 환영해요'),0);
+  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S.loggedIn=false;S.needsConsent=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
+}
+// 가입 동의 (문구 원본: legal/privacy-consent.md). 문구를 바꾸면 CONSENT_VERSION을 올려서 다시 동의를 받는다.
+const CONSENT_VERSION='v0.1';
+const PRIVACY_URL='https://github.com/eunice-mimi/withble/blob/main/legal/privacy-policy.md';
+const CONSENTS=[
+  {k:'age14',t:'만 14세 이상입니다',body:'<p>윗블은 만 14세 이상만 가입할 수 있어요. 만 14세 미만이면 가입할 수 없어요.</p>'},
+  {k:'collect',t:'개인정보 수집·이용 동의',body:'<p><b>수집 항목과 목적</b></p><p class="muted">· 카카오 회원번호, 닉네임: 회원 식별, 로그인<br>· 읽은 위치·날짜, 하이라이트, 저장한 구절: 성경 읽기 기록<br>· 묵상, 기도제목, 댓글, 반응, 공개 범위: 기록과 모임 나눔<br>· 소속 모임, 역할, 초대 기록: 모임 운영<br>· 접속 기록, IP 주소, 기기 정보: 부정 이용 방지, 오류 대응</p><p style="margin-top:10px"><b>보유 기간</b></p><p class="muted">회원 탈퇴 시까지 (접속 기록은 3개월)</p><p style="margin-top:10px" class="muted">동의를 거부할 수 있지만, 서비스에 꼭 필요한 정보라 동의하지 않으면 가입할 수 없어요.</p>'},
+  {k:'sensitive',t:'민감정보(신앙·건강) 처리 동의',body:'<p>윗블은 성경 읽기와 신앙 나눔 서비스라서, 이용 기록과 작성한 글에서 <b>종교(신앙)에 관한 정보</b>가 드러날 수 있어요. 기도제목에는 <b>건강 등에 관한 정보</b>가 담길 수 있어요.</p><p style="margin-top:10px" class="muted">· 목적: 성경 읽기, 묵상·기도 기록과 모임 나눔<br>· 보유 기간: 회원 탈퇴 시까지 (글은 삭제하면 파기)<br>· 동의를 거부할 수 있지만, 서비스의 핵심 기능과 분리할 수 없어 동의하지 않으면 가입할 수 없어요.</p>'},
+  {k:'overseas',t:'개인정보 국외 이전 동의',body:'<p>서비스 제공을 위해 아래 업체에 개인정보를 맡겨 처리해요. 모든 전송은 암호화돼요.</p><p style="margin-top:10px" class="muted">· <b>Supabase Inc.</b> (privacy@supabase.com): 회원 인증과 데이터 저장. 데이터는 대한민국(서울)에 저장되고, 관리 과정에서 미국 등에서 접근될 수 있어요. 처리방침 2항의 개인정보 전체 / 탈퇴 또는 위탁 종료 시까지<br>· <b>Vercel Inc.</b> (privacy@vercel.com): 웹 서비스 제공. 미국 등. 접속 기록, IP 주소, 기기 정보 / 수탁자 보관 정책 또는 위탁 종료 시까지</p><p style="margin-top:10px" class="muted">동의를 거부할 수 있지만, 위 업체 없이는 서비스를 제공할 수 없어 동의하지 않으면 가입할 수 없어요.</p>'},
+];
+// 현재 버전의 필수 동의를 모두 했는지 확인. 인터넷이 안 되면 이 기기에서 동의했던 기록으로 판단한다.
+async function hasConsent(){
+  const {data,error}=await sb.from('consents').select('item').eq('version',CONSENT_VERSION).eq('agreed',true).in('item',CONSENTS.map(c=>c.k));
+  if(error)return S.consentVersion===CONSENT_VERSION;
+  return new Set(data.map(r=>r.item)).size===CONSENTS.length;
 }
 // 서버의 내 프로필(이름·소개·사진)을 가져온다. 인터넷이 안 되면 저장해 둔 값을 그대로 쓴다.
 async function loadProfile(uid){
@@ -559,6 +582,17 @@ function kakaoCard(head,body,btn){return '<div class="kcard"><div class="kc-img"
 
 /* ============ screens ============ */
 const SC={};
+SC.consent=()=>hdr('윗블 이용 동의',{back:false})+'<div class="scroll"><p class="hint" style="margin-top:0">윗블을 시작하기 전에 아래 내용을 확인해 주세요. 필수 항목에 모두 동의해야 이용할 수 있어요.</p>'+
+  '<label class="agree-all"><input type="checkbox" id="agreeAll">필수 항목에 모두 동의</label>'+
+  '<div>'+CONSENTS.map(c=>'<div class="agree-row"><label><input type="checkbox" name="agree" value="'+c.k+'"><span><span class="req">[필수]</span> '+c.t+'</span></label><button class="agree-more" data-a="consentMore" data-k="'+c.k+'" aria-label="'+c.t+' 전문 보기">보기</button></div>').join('')+'</div>'+
+  '<div class="card agree-note"><b>[선택] 프로필 사진 · 이메일</b><p class="muted" style="margin-top:4px">카카오 동의 화면에서 고르신 대로 적용돼요. 사진은 모임에서 나를 표시하는 데, 이메일은 공지와 계정 문의 응대에만 쓰고, 탈퇴하면 함께 지워요. 동의하지 않아도 윗블을 쓸 수 있어요.</p></div>'+
+  '<p class="hint"><a class="agree-link" href="'+PRIVACY_URL+'" target="_blank" rel="noopener">개인정보 처리방침 전문 보기</a></p>'+
+  '<div class="form-foot"><button class="btn btn-primary block" data-a="consentAgree" id="consentBtn" disabled>동의하고 시작하기</button><button class="btn btn-ghost block" style="margin-top:var(--space-2)" data-a="consentDecline">동의하지 않고 나가기</button></div></div>';
+function syncConsent(t){
+  const items=[...document.querySelectorAll('input[name=agree]')];
+  if(t.id==='agreeAll')items.forEach(i=>{i.checked=t.checked;});
+  const all=items.every(i=>i.checked);$('#agreeAll').checked=all;$('#consentBtn').disabled=!all;
+}
 SC.login=()=>'<div class="login"><div class="login-top"><div class="logo">윗블</div><div class="logo-en">WITHBLE</div><p class="tagline">With Bible, With People.</p><p class="tagline-ko">말씀으로 함께하는 우리</p><blockquote class="login-verse">보라 형제가 연합하여 동거함이 어찌 그리 선하고 아름다운고<cite>시편 133:1</cite></blockquote></div><button class="btn btn-kakao block" data-a="login" id="loginBtn">카카오로 시작하기</button><p class="proto-note">카카오 계정의 닉네임과 프로필 사진(선택)만 받아요.</p></div>';
 
 SC.home=()=>{
@@ -781,6 +815,7 @@ function render(reset){
   if(reset===undefined)reset=true;
   const app=$('#app');const old=app.querySelector('.scroll');const prev=old?old.scrollTop:0;
   if(!S.loggedIn){app.innerHTML=SC.login();$('#tabbar').hidden=true;renderActionBar();return;}
+  if(S.needsConsent){app.innerHTML=SC.consent();$('#tabbar').hidden=true;renderActionBar();return;}
   const r=cur();
   app.innerHTML=(SC[r.name]||SC.home)(r);
   renderTabbar();
@@ -842,6 +877,21 @@ function copy(text,msg){const ok=()=>toast(msg||'링크를 복사했어요');try
 
 /* ============ actions ============ */
 const A={
+  consentMore(d){const c=CONSENTS.find(x=>x.k===d.k);if(c)modal({title:c.t,body:c.body,actions:[{label:'확인',kind:'primary'}]});},
+  async consentAgree(d,el){
+    if(document.querySelectorAll('input[name=agree]:checked').length!==CONSENTS.length)return;
+    el.disabled=true;el.textContent='저장 중…';
+    const {data:{session}}=await sb.auth.getSession();
+    const rows=CONSENTS.map(c=>({item:c.k,version:CONSENT_VERSION,agreed:true}));
+    rows.push({item:'photo',version:CONSENT_VERSION,agreed:!!S.user.avatar},{item:'email',version:CONSENT_VERSION,agreed:!!(session&&session.user.email)});
+    const {error}=await sb.from('consents').insert(rows);
+    if(error){el.disabled=false;el.textContent='동의하고 시작하기';toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return;}
+    S.consentVersion=CONSENT_VERSION;S.needsConsent=false;save();UI.tab='home';UI.stack=[{name:'home'}];render();toast(S.user.name+'님, 환영해요');
+  },
+  consentDecline(){confirmModal('동의하지 않고 나갈까요?','필수 항목에 동의하지 않으면 윗블을 이용할 수 없어요. 방금 만들어진 계정 정보는 바로 삭제돼요.','나가기',async()=>{
+    await sb.rpc('delete_account');await sb.auth.signOut({scope:'local'}).catch(()=>{});
+    S.loggedIn=false;S.needsConsent=false;save();render();toast('계정 정보를 삭제했어요');
+  });},
   async login(d,el){el.disabled=true;el.textContent='카카오로 이동 중…';
     const {error}=await sb.auth.signInWithOAuth({provider:'kakao',options:{redirectTo:location.origin}});
     if(error){el.disabled=false;el.textContent='카카오로 시작하기';toast('로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요');}
@@ -985,6 +1035,7 @@ document.addEventListener('scroll',e=>{
   S.lastRead={b:r.b,c:r.c,p:Math.min(100,Math.round(sc.scrollTop/max*100))};clearTimeout(readTm);readTm=setTimeout(save,250);
 },true);
 document.addEventListener('input',e=>{
+  if(e.target.name==='agree'||e.target.id==='agreeAll')syncConsent(e.target);
   if(e.target.id==='searchInput'){UI.q=e.target.value;$('#searchResults').innerHTML=searchResults();}
 });
 
