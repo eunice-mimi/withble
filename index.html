@@ -741,6 +741,7 @@ SC.my=()=>{
   '<h3 class="sec">설정</h3><div class="settings">'+
   '<button class="set-row" data-a="toggleNotify" role="switch" aria-checked="'+S.settings.notify+'"><span class="sr-main">알림<small>모임의 새 기도제목과 묵상 소식</small></span><span class="switch" aria-checked="'+S.settings.notify+'"></span></button>'+
   '<button class="set-row" data-a="defVis"><span class="sr-main">공개범위 기본 설정<small>'+esc(visLabel(S.settings.defVis))+'</small></span>'+ic('right')+'</button>'+
+  (isStandalone()?'':'<button class="set-row" data-a="installApp"><span class="sr-main">홈 화면에 추가<small>앱처럼 설치하고, 인터넷 없이도 성경 읽기</small></span>'+ic('right')+'</button>')+
   '<button class="set-row" data-a="serviceInfo"><span class="sr-main">서비스 정보<small>윗블 프로토타입 v0.1</small></span>'+ic('right')+'</button>'+
   '<button class="set-row" data-a="resetAll"><span class="sr-main">테스트 데이터 초기화<small>처음 상태로 되돌려요</small></span>'+ic('right')+'</button>'+
   '<button class="set-row danger" data-a="logout"><span class="sr-main">로그아웃</span></button></div></div>';
@@ -914,6 +915,14 @@ const A={
   toggleNotify(){S.settings.notify=!S.settings.notify;save();render(false);toast(S.settings.notify?'알림을 켰어요':'알림을 껐어요');},
   defVis(){modal({title:'공개범위 기본 설정',body:'<p class="muted">새 묵상·기도를 쓸 때 처음 선택될 공개범위예요. 글마다 바꿀 수 있어요.</p><div class="targets">'+[['private','나만 보기 (권장)'],...S.groups.map(g=>[g.id,g.name])].map(([v,l])=>'<label class="target"><input type="radio" name="dv" value="'+v+'" '+(S.settings.defVis===v?'checked':'')+'><span>'+esc(l)+'</span></label>').join('')+'</div>',
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{S.settings.defVis=document.querySelector('input[name=dv]:checked').value;save();render(false);toast('기본 공개범위를 저장했어요');}}]});},
+  installApp(){
+    if(installEvt){installEvt.prompt();installEvt.userChoice.then(r=>{if(r.outcome==='accepted')toast('홈 화면에 윗블을 추가했어요');});installEvt=null;return;}
+    const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    const steps=ios?['Safari 화면의 <b>공유 버튼</b>(네모에 위쪽 화살표)을 눌러요','목록에서 <b>홈 화면에 추가</b>를 눌러요','오른쪽 위 <b>추가</b>를 누르면 끝이에요']
+      :['브라우저 오른쪽 위 <b>⋮ 메뉴</b>를 눌러요','<b>홈 화면에 추가</b> 또는 <b>앱 설치</b>를 눌러요'];
+    const note=ios?'카카오톡 등 다른 앱 안에서 열었다면, 먼저 Safari로 열어 주세요.':'카카오톡 안에서 열었다면, 먼저 Chrome이나 삼성 인터넷으로 열어 주세요.';
+    modal({title:'홈 화면에 윗블 추가하기',body:steps.map((t,i)=>'<p>'+(i+1)+'. '+t+'</p>').join('')+'<p class="muted" style="margin-top:10px;font-size:14px">'+note+'</p>',actions:[{label:'확인',kind:'primary'}]});
+  },
   serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">프로토타입 v0.1 · 성경 본문 개역한글(66권 전체)<br>모든 기록은 이 브라우저에만 저장되며, 카카오 로그인·공유·초대는 시뮬레이션이에요.</p>',actions:[{label:'닫기',kind:'primary'}]});},
   editProfile(){modal({title:'프로필 편집',body:'<div class="field" style="margin-top:6px"><label for="pfName">이름</label><input class="input" id="pfName" maxlength="12" value="'+esc(S.user.name)+'"></div><div class="field"><label for="pfBio">한 줄 소개</label><input class="input" id="pfBio" maxlength="30" value="'+esc(S.user.bio)+'"></div>',
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}S.user.name=n;S.user.bio=$('#pfBio').value.trim()||'말씀으로 함께 걷는 중 ';save();render(false);toast('프로필을 저장했어요');}}]});},
@@ -949,6 +958,11 @@ document.addEventListener('input',e=>{
 
 // 웹앱: 서비스 워커 등록 (오프라인 저장, sw.js 참고)
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+// 안드로이드 크롬의 설치 요청을 보관했다가 MY > 홈 화면에 추가에서 사용
+let installEvt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;});
+window.addEventListener('appinstalled',()=>{installEvt=null;});
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 load();
 $('#app').innerHTML='<div class="empty"><h4>성경 본문을 불러오는 중이에요</h4></div>';
 loadBible().then(render).catch(()=>{

@@ -23,22 +23,25 @@ With + Bible. 성경을 읽고, 묵상과 기도제목을 모임(셀·부서·�
 - 데이터 저장: `localStorage` 키 `withble.prototype.v1`. 처음 실행 시 `seed()`가 더미 데이터 생성.
 - 성경 목록: `OT`, `NT` 배열 → `BOOKS` (각 항목 `{name, ch, t:'ot'|'nt'}`).
 
-## 성경 본문 (다음 작업)
+## 성경 본문 (완료)
 
-- 현재 `TEXT` 객체에 샘플 4장만 하드코딩되어 있음: 시편 23편, 요한복음 3·15장, 마태복음 5장.
-  - 키 형식: `TEXT['책인덱스-장']` = `{ v: ['1절', '2절', ...] }`
-  - `AVAILABLE`, `TODAY_REF`, `PRESETS`가 이 샘플 장에 의존함.
-- **목표: 개역한글 전체(66권 1,189장 31,102절)로 교체.**
-- 데이터 출처: GitHub `yuhwan/Bible-krv` (https://github.com/yuhwan/Bible-krv)
-  - 책별 JSON 66개 + `books.json`(책 순서 목록).
-  - 형식: `{"book":"요한복음","chapters":[{"chapter":1,"verses":[{"verse":1,"text":"..."}]}]}`
-  - 개역한글(1961)은 저작권이 만료된 퍼블릭 도메인. **개역개정은 저작권이 있으므로 쓰지 말 것.**
-- 주의할 점:
-  - 책 이름 불일치: 앱은 `요한일서/요한이서/요한삼서`, 데이터는 `요한1서/요한2서/요한3서`. 매칭할 때 처리 필요.
-  - 시편 일부는 1절 앞에 `[다윗의 시]` 같은 표제가 붙어 있음 → 본문과 분리해서 작은 회색 글씨로 표시.
-  - 별도 JSON 파일을 `fetch`로 읽으면 파일을 더블클릭(file://)해서는 안 열림. 로컬 서버로 실행할 것
-    (예: `python3 -m http.server` 또는 `npx serve`). 실행 방법도 알려줘.
-  - 검색(`searchResults`)이 `TEXT` 전체를 순회하므로, 전체 본문이 들어가면 속도를 확인할 것.
+- `data/krv.json`: 개역한글 전체(66권 1,189장 31,102절). 앱 시작 시 `loadBible()`이 읽어 `TEXT`를 채움.
+  - 키 형식: `TEXT['책인덱스-장']` = `{ v: ['1절', ...], title?: '시편 표제' }`
+  - 다시 만들기: `python3 tools/build-krv.py <yuhwan/Bible-krv JSON 폴더>`
+- 데이터 출처: GitHub `yuhwan/Bible-krv`. 개역한글(1961)은 퍼블릭 도메인. **개역개정은 저작권이 있으므로 쓰지 말 것.**
+- `fetch`를 쓰므로 파일 더블클릭(file://)으로는 안 열림. 로컬에서는 `python3 -m http.server 8000` 후 http://localhost:8000.
+- 검색 결과는 `SEARCH_MAX`(100)개까지만 그림 (많이 그리면 느려짐).
+
+## 웹앱(PWA)·배포
+
+- GitHub `eunice-mimi/withble`의 `main`에 push하면 Vercel(https://withble.vercel.app)에 자동 배포됨.
+- `manifest.webmanifest` + `icons/`: 홈 화면 설치용 이름·아이콘. 아이콘은 검정 배경에 흰 "윗블"(Pretendard 800).
+- `sw.js`(서비스 워커): 한 번 열면 오프라인에서도 앱·성경 본문 사용 가능.
+  - 화면 파일은 network-first라 배포하면 바로 반영됨.
+  - **`data/krv.json`이나 아이콘을 바꾸면 `sw.js`의 `VERSION`을 올릴 것** (cache-first라 안 올리면 옛 파일이 계속 쓰임).
+  - 새 파일을 오프라인 저장 대상에 넣으려면 `PRECACHE` 목록에 추가.
+- MY > 홈 화면에 추가: 안드로이드 크롬은 설치 창, 아이폰은 안내 모달 (`A.installApp`).
+- 개인정보 처리방침·가입 동의 문구 초안: `legal/` (README 참고).
 
 ## 디자인 시스템
 
