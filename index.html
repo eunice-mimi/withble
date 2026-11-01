@@ -414,6 +414,7 @@ async function initAuth(){
   const q=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.slice(1));
   const err=q.get('error_description')||h.get('error_description')||q.get('error')||h.get('error');
   const justSignedIn=q.has('code');
+  const jc=q.get('join');if(jc){try{localStorage.setItem(JOIN_KEY,jc.trim().toUpperCase());}catch(e){}}
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(!session||S.uid!==session.user.id)S=blank();
@@ -421,7 +422,8 @@ async function initAuth(){
     if(session){S.uid=session.user.id;await loadProfile(S.uid);S.needsConsent=!(await hasConsent());if(!S.needsConsent)await loadMine();}
   }catch(e){if(!S.uid){S=blank();}}
   save();
-  if(justSignedIn||err)history.replaceState(null,'',location.pathname);
+  if(justSignedIn||err||jc)history.replaceState(null,'',location.pathname);
+  if(S.loggedIn&&!S.needsConsent)openPendingInvite();
   if(err)setTimeout(()=>toast('카카오 로그인에 실패했어요: '+err),0);
   else if(justSignedIn&&S.loggedIn&&!S.needsConsent)setTimeout(()=>toast(S.user.name+'님, 환영해요'),0);
   sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S=blank();save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
@@ -471,7 +473,41 @@ async function loadMine(){
   S.readDays=rd.map(r=>{const[y,m,d]=r.day.split('-').map(Number);return y+'-'+m+'-'+d;});
   S.meditations=md.map(rowMed);S.prayers=pr.map(rowPray);
   save();
+  await loadGroups();
 }
+// 내가 속한 모임과 멤버 이름을 가져온다.
+async function loadGroups(){
+  const {data:gs,error}=await sb.from('groups').select('id,name,type,description,created_at,group_members(user_id,role,joined_at)').order('created_at');
+  if(error)return;
+  const ids=[...new Set(gs.flatMap(g=>g.group_members.map(m=>m.user_id)))];
+  const {data:ps}=ids.length?await sb.from('profiles').select('id,name').in('id',ids):{data:[]};
+  const nm=Object.fromEntries((ps||[]).map(x=>[x.id,x.name]));
+  S.groups=gs.map(g=>({id:g.id,name:g.name,type:g.type,desc:g.description,count:g.group_members.length,
+    members:g.group_members.sort((a,b)=>a.joined_at<b.joined_at?-1:1).map(m=>({id:m.user_id,name:nm[m.user_id]||'멤버',role:m.role,me:m.user_id===S.uid}))}));
+  save();
+}
+// 초대: 링크(https://.../?join=코드)는 모임 화면을 열 때 미리 만들어 둔다.
+// (아이폰은 버튼을 누른 순간에만 공유 창을 열 수 있어서, 누른 뒤 서버를 기다리면 막힌다)
+const JOIN_KEY='withble.join';
+const INVITES={};
+async function prefetchInvite(gid){
+  if(INVITES[gid])return INVITES[gid];
+  const {data:code,error}=await sb.rpc('create_invite',{p_group:gid});
+  if(error)return null;
+  return INVITES[gid]=location.origin+'/?join='+code;
+}
+const inviteText=g=>S.user.name+'님이 윗블 「'+g.name+'」 모임에 초대했어요. 함께 말씀과 기도를 나눠요.';
+function sendInvite(g,url){
+  const done=()=>{UI.invited=true;if(cur().name==='groupCreated')render(false);};
+  if(navigator.share)navigator.share({title:'윗블 초대',text:inviteText(g),url}).then(done,()=>{});
+  else{copy(inviteText(g)+'\n'+url,'초대 링크를 복사했어요. 카카오톡에 붙여넣어 보내 주세요');done();}
+}
+// 초대 링크로 들어왔으면, 로그인·동의를 마친 뒤 초대 화면을 연다.
+function openPendingInvite(){
+  let code=null;try{code=localStorage.getItem(JOIN_KEY);localStorage.removeItem(JOIN_KEY);}catch(e){}
+  if(code){UI.tab='groups';UI.stack=[{name:'groups'},{name:'invite',code}];}
+}
+const rpcMsg=(error,fallback)=>error&&error.code==='P0001'?error.message:fallback;
 // 서버 저장 결과 확인. 실패하면 undo로 화면을 되돌리고 알려준다.
 async function sync(req,undo){
   const {error}=await req;
@@ -592,7 +628,8 @@ function syncConsent(t){
   if(t.id==='agreeAll')items.forEach(i=>{i.checked=t.checked;});
   const all=items.every(i=>i.checked);$('#agreeAll').checked=all;$('#consentBtn').disabled=!all;
 }
-SC.login=()=>'<div class="login"><div class="login-top"><div class="logo">윗블</div><div class="logo-en">WITHBLE</div><p class="tagline">With Bible, With People.</p><p class="tagline-ko">말씀으로 함께하는 우리</p><blockquote class="login-verse">보라 형제가 연합하여 동거함이 어찌 그리 선하고 아름다운고<cite>시편 133:1</cite></blockquote></div><button class="btn btn-kakao block" data-a="login" id="loginBtn">카카오로 시작하기</button><p class="proto-note">카카오 계정의 닉네임과 프로필 사진(선택)만 받아요.</p></div>';
+SC.login=()=>'<div class="login"><div class="login-top"><div class="logo">윗블</div><div class="logo-en">WITHBLE</div><p class="tagline">With Bible, With People.</p><p class="tagline-ko">말씀으로 함께하는 우리</p><blockquote class="login-verse">보라 형제가 연합하여 동거함이 어찌 그리 선하고 아름다운고<cite>시편 133:1</cite></blockquote></div><button class="btn btn-kakao block" data-a="login" id="loginBtn">카카오로 시작하기</button><p class="proto-note">'+(hasPendingInvite()?'초대받은 모임에 들어가려면 먼저 로그인해 주세요.':'카카오 계정의 닉네임과 프로필 사진(선택)만 받아요.')+'</p></div>';
+function hasPendingInvite(){try{return !!localStorage.getItem(JOIN_KEY);}catch(e){return false;}}
 
 SC.home=()=>{
   const lr=S.lastRead,lb=BOOKS[lr.b];
@@ -745,17 +782,32 @@ SC.groups=()=>hdr('모임',{back:false,right:'<button class="icon-btn" data-a="n
   S.groups.map(g=>'<button class="grp-row" data-a="openGroup" data-id="'+g.id+'"><span class="grp-emoji">'+esc(g.name[0])+'</span><span class="grp-main"><span class="grp-name">'+esc(g.name)+(g.members.some(m=>m.me&&m.role==='leader')?' <span class="badge leader">리더</span>':'')+'</span><span class="grp-sub">'+g.count+'명 · '+esc(g.type)+'</span></span>'+ic('right')+'</button>').join('')+
   '<button class="add-group" data-a="newGroup">'+ic('plus')+'모임 만들기</button></div>';
 
+SC.invite=r=>{
+  let body;
+  if(!r.p&&!r.err)body='<div class="empty"><h4>초대 정보를 확인하고 있어요</h4></div>';
+  else if(r.err)body=empty('','초대 링크가 만료되었거나 올바르지 않아요','초대한 분께 새 링크를 부탁해 주세요. 링크는 14일 동안 쓸 수 있어요.','모임으로 가기','tab','data-t="groups"');
+  else if(r.p.already_member)body=empty('','이미 '+esc(r.p.name)+' 멤버예요','모임에서 함께 나누고 있어요.','모임으로 가기','openGroup','data-id="'+r.p.group_id+'"');
+  else body='<div class="created"><div class="em"></div><h2>'+esc(josa(r.p.name,'에','에'))+'<br>초대받았어요</h2><p>'+esc(r.p.type)+' · 멤버 '+r.p.member_count+'명</p></div>'+
+    '<div class="stack" style="margin-top:28px"><button class="btn btn-primary block" data-a="acceptInvite" data-code="'+esc(r.code)+'">초대 수락하기</button><button class="btn btn-text block" data-a="tab" data-t="groups">나중에 하기</button></div>'+
+    '<p class="proto-note">수락하면 모임 멤버에게 내 이름이 보이고, 내가 이 모임에 공개한 글을 함께 볼 수 있어요.</p>';
+  return hdr('모임 초대')+'<div class="scroll">'+body+'</div>';
+};
+async function loadInvitePreview(r){
+  const {data,error}=await sb.rpc('invite_preview',{p_code:r.code});
+  if(error||!data||!data.length)r.err=true;else r.p=data[0];
+  if(cur()===r)render(false);
+}
 SC.groupNew=()=>hdr('모임 만들기')+'<div class="scroll"><div class="field" style="margin-top:4px"><label for="gName">모임 이름</label><input class="input" id="gName" maxlength="20" placeholder="예: 소망셀, 주일 3부 청년부"></div>'+
   '<div class="field"><span class="lbl">유형</span><div class="chips">'+Object.keys(TYPE_EMOJI).map((t,i)=>'<label class="chip"><input type="radio" name="gtype" value="'+t+'" '+(i===0?'checked':'')+'>'+TYPE_EMOJI[t]+' '+t+'</label>').join('')+'</div></div>'+
-  '<div class="field"><label for="gDesc">설명 <span class="sec-sub">(선택)</span></label><textarea class="textarea short" id="gDesc" placeholder="어떤 모임인지 짧게 소개해주세요."></textarea></div>'+
+  '<div class="field"><label for="gDesc">설명 <span class="sec-sub">(선택)</span></label><textarea class="textarea short" id="gDesc" maxlength="200" placeholder="어떤 모임인지 짧게 소개해주세요."></textarea></div>'+
   '<div class="form-foot"><button class="btn btn-primary block" data-a="createGroup">모임 만들기</button></div></div>';
 
 SC.groupCreated=r=>{
   const g=grp(r.gid);if(!g)return missing();
   return hdr('',{back:false})+'<div class="scroll"><div class="created"><div class="em"></div><h2>'+esc(josa(g.name,'이','가'))+' 만들어졌어요!</h2><p>함께할 사람들을 초대해보세요.</p></div>'+
-  '<div class="stack" style="margin-top:28px"><button class="btn btn-kakao block" data-a="inviteKakao" data-id="'+g.id+'">카카오톡으로 초대</button><button class="btn btn-ghost block" data-a="copyInvite" data-id="'+g.id+'">'+ic('copy')+'초대 링크 복사</button>'+
+  '<div class="stack" style="margin-top:28px"><button class="btn btn-primary block" data-a="inviteKakao" data-id="'+g.id+'">'+ic('share')+'초대 링크 보내기</button><button class="btn btn-ghost block" data-a="copyInvite" data-id="'+g.id+'">'+ic('copy')+'초대 링크 복사</button>'+
   '<button class="btn '+(UI.invited?'btn-primary':'btn-text')+' block" data-a="enterGroup" data-id="'+g.id+'">'+(UI.invited?'모임 홈으로 가기':'나중에 하기')+'</button></div>'+
-  '<p class="proto-note">Prototype에서는 실제 Kakao API 대신 초대 과정을 시뮬레이션합니다.</p></div>';
+  '<p class="proto-note">카카오톡 등 원하는 곳으로 보낼 수 있어요. 초대 링크는 14일 동안 쓸 수 있어요.</p></div>';
 };
 
 function weeklyCard(g){
@@ -786,7 +838,8 @@ SC.group=r=>{
   }else{
     const ms=[...g.members].sort((a,b)=>(b.role==='leader')-(a.role==='leader')||(b.me?1:0)-(a.me?1:0));
     body='<div style="margin-top:8px">'+ms.map(m=>{const n=m.me?S.user.name:m.name;return '<div class="member"><span class="av">'+esc(n[0])+'</span><span style="flex:1"><b>'+esc(n)+'</b>'+(m.me?' <small>(나)</small>':'')+'</span>'+(m.role==='leader'?'<span class="badge leader">리더</span>':'<small>멤버</small>')+'</div>';}).join('')+
-    (g.count>g.members.length?'<p class="hint">외 '+(g.count-g.members.length)+'명</p>':'')+'</div><button class="btn btn-soft block" style="margin-top:16px" data-a="inviteKakao" data-id="'+g.id+'">'+ic('userplus')+'멤버 초대하기</button>';
+    '</div><button class="btn btn-soft block" style="margin-top:16px" data-a="inviteKakao" data-id="'+g.id+'">'+ic('userplus')+'멤버 초대하기</button>'+
+    '<button class="btn btn-text block" style="margin-top:8px;color:var(--muted)" data-a="leaveGroup" data-id="'+g.id+'">모임 나가기</button>';
   }
   const tabs=[['home','홈'],['pray','기도'],['med','묵상'],['members','멤버']];
   return hdr(esc(g.name),{sub:g.count+'명이 함께하고 있어요',right:'<button class="icon-btn" data-a="inviteKakao" data-id="'+g.id+'" aria-label="초대하기">'+ic('userplus')+'</button>'})+
@@ -835,6 +888,8 @@ function afterRender(r){
     save();
     if(r.focus){const el=document.getElementById('v-'+r.focus);if(el){requestAnimationFrame(()=>{el.scrollIntoView({block:'center'});el.classList.add('flash');});}}
   }
+  if((r.name==='group'||r.name==='groupCreated')&&S.loggedIn)prefetchInvite(r.gid);
+  if(r.name==='invite'&&!r.p&&!r.err)loadInvitePreview(r);
   if(r.name==='search'){const i=$('#searchInput');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
 }
 function renderActionBar(){
@@ -904,7 +959,7 @@ const A={
     rows.push({item:'photo',version:CONSENT_VERSION,agreed:!!S.user.avatar},{item:'email',version:CONSENT_VERSION,agreed:!!(session&&session.user.email)});
     const {error}=await sb.from('consents').insert(rows);
     if(error){el.disabled=false;el.textContent='동의하고 시작하기';toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return;}
-    S.consentVersion=CONSENT_VERSION;S.needsConsent=false;await loadMine();save();UI.tab='home';UI.stack=[{name:'home'}];render();toast(S.user.name+'님, 환영해요');
+    S.consentVersion=CONSENT_VERSION;S.needsConsent=false;await loadMine();save();UI.tab='home';UI.stack=[{name:'home'}];openPendingInvite();render();toast(S.user.name+'님, 환영해요');
   },
   consentDecline(){confirmModal('동의하지 않고 나갈까요?','필수 항목에 동의하지 않으면 윗블을 이용할 수 없어요. 방금 만들어진 계정 정보는 바로 삭제돼요.','나가기',async()=>{
     await sb.rpc('delete_account');await sb.auth.signOut({scope:'local'}).catch(()=>{});
@@ -1003,17 +1058,32 @@ const A={
   openGroup(d){UI.gTab=d.tab||'home';UI.gpf='all';go('group',{gid:d.id});},
   gTab(d){UI.gTab=d.t;render(false);},
   gPrayFilter(d){UI.gpf=d.f;render(false);},
-  newGroup(){toast('모임 기능은 곧 열려요');},
-  createGroup(){const ni=$('#gName');const name=ni.value.trim();if(!name){toast('모임 이름을 적어주세요');ni.focus();return;}
+  newGroup(){go('groupNew');},
+  async createGroup(){const ni=$('#gName');const name=ni.value.trim();if(!name){toast('모임 이름을 적어주세요');ni.focus();return;}
     const type=document.querySelector('input[name=gtype]:checked').value;const desc=$('#gDesc').value.trim();
-    const g={id:uid('g'),name,emoji:TYPE_EMOJI[type],type,desc,count:1,members:[{name:S.user.name,role:'leader',me:true}]};
-    S.groups.push(g);S.groupShares[g.id]=0;save();UI.invited=false;replace('groupCreated',{gid:g.id});toast('모임을 만들었어요');},
+    if(UI.saving)return;UI.saving=true;
+    const {data:gid,error}=await sb.rpc('create_group',{p_name:name,p_type:type,p_description:desc});UI.saving=false;
+    if(error){toast(rpcMsg(error,'모임을 만들지 못했어요. 인터넷 연결을 확인해 주세요'));return;}
+    await loadGroups();UI.invited=false;replace('groupCreated',{gid});toast('모임을 만들었어요');},
   enterGroup(d){UI.gTab='home';UI.gpf='all';replace('group',{gid:d.id});},
-  inviteKakao(d){const g=grp(d.id);
-    kakao({title:'카카오톡으로 초대',q:'어느 채팅방에 초대 메시지를 보낼까요?',target:'family',ok:'초대 보내기',done:'✓ 초대 메시지를 보냈어요.',
-      preview:kakaoCard(esc(S.user.name)+'님의 초대',esc(g.name)+'에 함께해요<br><span style="font-size:12.5px;opacity:.85">윗블에서 말씀과 기도를 함께 기록해요.</span>','초대 수락하기'),
-      after:()=>{UI.invited=true;if(cur().name==='groupCreated')render(false);mockJoin(g);}});},
-  copyInvite(d){copy('https://withble.app/invite/'+d.id,'초대 링크를 복사했어요');UI.invited=true;if(cur().name==='groupCreated')render(false);},
+  // 휴대폰 공유 창으로 초대 링크 보내기 (컴퓨터는 복사). 링크가 아직 없으면 만든 뒤 버튼을 한 번 더 누르게 한다.
+  async inviteKakao(d){const g=grp(d.id);if(!g)return;
+    if(INVITES[g.id]){sendInvite(g,INVITES[g.id]);return;}
+    const url=await prefetchInvite(g.id);if(!url){toast('초대 링크를 만들지 못했어요. 인터넷 연결을 확인해 주세요');return;}
+    modal({title:'초대 링크가 준비됐어요',body:'<p class="muted">'+esc(g.name)+' 초대 링크를 보낼게요. 링크는 14일 동안 쓸 수 있어요.</p>',actions:[{label:'취소'},{label:'보내기',kind:'primary',fn:()=>sendInvite(g,url)}]});},
+  async copyInvite(d){const g=grp(d.id);if(!g)return;const url=await prefetchInvite(g.id);if(!url){toast('초대 링크를 만들지 못했어요. 인터넷 연결을 확인해 주세요');return;}
+    copy(inviteText(g)+'\n'+url,'초대 링크를 복사했어요');UI.invited=true;if(cur().name==='groupCreated')render(false);},
+  async acceptInvite(d,el){if(UI.saving)return;UI.saving=true;el.disabled=true;
+    const {data:gid,error}=await sb.rpc('join_group',{p_code:d.code});UI.saving=false;
+    if(error){el.disabled=false;toast(rpcMsg(error,'들어가지 못했어요. 인터넷 연결을 확인해 주세요'));return;}
+    await loadGroups();const g=grp(gid);UI.gTab='home';UI.gpf='all';UI.stack=[{name:'groups'},{name:'group',gid}];render();if(g)toast(josa(g.name,'에','에')+' 들어왔어요');},
+  leaveGroup(d){const g=grp(d.id);if(!g)return;const leader=g.members.some(m=>m.me&&m.role==='leader');
+    confirmModal(josa(g.name,'에서','에서')+' 나갈까요?','내가 이 모임에 공개한 묵상·기도는 나만 보기로 바뀌어요.'+(leader&&g.count>1?' 모임장 역할은 가장 먼저 들어온 멤버에게 넘어가요.':'')+(g.count===1?' 마지막 멤버라 모임이 삭제돼요.':''),'나가기',async()=>{
+      const {error}=await sb.rpc('leave_group',{p_group:g.id});
+      if(error){toast(rpcMsg(error,'나가지 못했어요. 인터넷 연결을 확인해 주세요'));return;}
+      [...S.meditations,...S.prayers].forEach(x=>{if(x.own&&x.vis===g.id)x.vis='private';});
+      if(S.settings.defVis===g.id)S.settings.defVis='private';
+      S.groups=S.groups.filter(x=>x.id!==g.id);delete INVITES[g.id];save();tab('groups');toast(josa(g.name,'에서','에서')+' 나왔어요');});},
   /* my */
   toggleNotify(){const v=!S.settings.notify;S.settings.notify=v;save();render(false);
     sync(sb.from('user_settings').update({notify:v}).eq('user_id',S.uid),()=>{S.settings.notify=!v;}).then(ok=>{if(ok)toast(v?'알림을 켰어요':'알림을 껐어요');});},
@@ -1033,11 +1103,6 @@ const A={
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}const bio=$('#pfBio').value.trim(),old={name:S.user.name,bio:S.user.bio};S.user.name=n;S.user.bio=bio;save();render(false);
       sync(sb.from('profiles').update({name:n,bio}).eq('id',S.uid),()=>Object.assign(S.user,old)).then(ok=>{if(ok)toast('프로필을 저장했어요');});}}]});},
 };
-function mockJoin(g){
-  const pool=['재문','영희','민수','지은','하늘'].filter(n=>!g.members.some(m=>m.name===n));
-  if(g.members.length>=4||!pool.length)return;
-  setTimeout(()=>{const n=pool[0];g.members.push({name:n,role:'member'});g.count=Math.max(g.count+1,g.members.length);save();const r=cur();if(r.name==='group'||r.name==='groupCreated'||r.name==='groups')render(false);toast(''+n+'님이 '+g.name+'에 들어왔어요');},1800);
-}
 
 /* ============ events ============ */
 document.addEventListener('click',e=>{
