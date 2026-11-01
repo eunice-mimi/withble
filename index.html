@@ -388,14 +388,9 @@ h1,h2,h3,h4,p{margin:0}
     <div class="modal-root" id="modalRoot"></div>
   </div>
   <aside class="side-note">
-    <h2>윗블 프로토타입</h2>
-    <p>읽다, 기록하다, 나누다, 함께하다. 왼쪽 화면을 직접 눌러보세요. 기록은 이 브라우저에 저장돼요.</p>
-    <ol>
-      <li><b>Flow A · 말씀에서 묵상까지</b><span>성경 → 요한복음 3장 → 구절 여러 개 선택 → 묵상 → 사랑셀 공개 → 저장 → 사랑셀에서 보기 → 공유</span></li>
-      <li><b>Flow B · 모임 만들기</b><span>모임 → 모임 만들기 → 초대 → 모임 홈 → 기도 작성 → 이번 주 카드 공유</span></li>
-      <li><b>Flow C · 함께 기도</b><span>사랑셀 → 기도 탭 → 함께 기도해요 누르기/취소 → 응답됨 필터</span></li>
-    </ol>
-    <button class="btn btn-ghost" data-a="resetAll">테스트 데이터 초기화</button>
+    <h2>윗블</h2>
+    <p>읽다, 기록하다, 나누다, 함께하다. 성경을 읽고 묵상과 기도제목을 모임과 나눠요.</p>
+    <p>휴대폰에서는 MY &gt; 홈 화면에 추가로 앱처럼 쓸 수 있어요.</p>
   </aside>
 </div>
 
@@ -421,14 +416,15 @@ async function initAuth(){
   const justSignedIn=q.has('code');
   try{
     const {data:{session}}=await sb.auth.getSession();
-    S.loggedIn=!!session;S.needsConsent=false;
-    if(session){await loadProfile(session.user.id);S.needsConsent=!(await hasConsent());}
-  }catch(e){S.loggedIn=false;S.needsConsent=false;}
+    if(!session||S.uid!==session.user.id)S=blank();
+    S.loggedIn=!!session;
+    if(session){S.uid=session.user.id;await loadProfile(S.uid);S.needsConsent=!(await hasConsent());if(!S.needsConsent)await loadMine();}
+  }catch(e){if(!S.uid){S=blank();}}
   save();
   if(justSignedIn||err)history.replaceState(null,'',location.pathname);
   if(err)setTimeout(()=>toast('카카오 로그인에 실패했어요: '+err),0);
   else if(justSignedIn&&S.loggedIn&&!S.needsConsent)setTimeout(()=>toast(S.user.name+'님, 환영해요'),0);
-  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S.loggedIn=false;S.needsConsent=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
+  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S=blank();save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
 }
 // 가입 동의 (문구 원본: legal/privacy-consent.md). 문구를 바꾸면 CONSENT_VERSION을 올려서 다시 동의를 받는다.
 const CONSENT_VERSION='v0.1';
@@ -450,6 +446,42 @@ async function loadProfile(uid){
   const {data}=await sb.from('profiles').select('name,bio,avatar_url').eq('id',uid).maybeSingle();
   if(data)Object.assign(S.user,{name:data.name,bio:data.bio,avatar:data.avatar_url});
 }
+
+// 서버에서 내 기록을 모두 가져와 S에 채운다. 인터넷이 안 되면 기기에 남은 사본을 그대로 쓴다.
+const isoDay=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const rowRef=r=>r.ref_book==null?null:{b:r.ref_book,c:r.ref_chapter,vs:r.ref_verses||[1]};
+const refCols=ref=>ref?{ref_book:ref.b,ref_chapter:ref.c,ref_verses:ref.vs}:{ref_book:null,ref_chapter:null,ref_verses:null};
+const rowMed=r=>({id:r.id,own:r.author_id===S.uid,author:S.user.name,ref:rowRef(r),text:r.body,vis:r.group_id||'private',at:Date.parse(r.created_at),rx:{n:0,on:false}});
+const rowPray=r=>({id:r.id,own:r.author_id===S.uid,author:S.user.name,title:r.title,body:r.body,ref:rowRef(r),vis:r.group_id||'private',status:r.status,at:Date.parse(r.created_at),rx:{n:0,on:false}});
+async function loadMine(){
+  const since=isoDay(Date.now()-60*D);
+  const res=await Promise.all([
+    sb.from('user_settings').select('notify,def_vis,last_book,last_chapter,last_progress').eq('user_id',S.uid).maybeSingle(),
+    sb.from('highlights').select('book,chapter,verse,created_at').eq('user_id',S.uid),
+    sb.from('saved_verses').select('book,chapter,verse,created_at').eq('user_id',S.uid),
+    sb.from('reading_days').select('day').eq('user_id',S.uid).gte('day',since),
+    sb.from('meditations').select('*').eq('author_id',S.uid),
+    sb.from('prayers').select('*').eq('author_id',S.uid),
+  ]);
+  if(res.some(r=>r.error))return;
+  const [st,hl,sv,rd,md,pr]=res.map(r=>r.data);
+  if(st){S.settings={notify:st.notify,defVis:st.def_vis};if(st.last_book!=null)S.lastRead={b:st.last_book,c:st.last_chapter,p:st.last_progress};}
+  const verse=r=>({k:keyOf(r.book,r.chapter,r.verse),at:Date.parse(r.created_at)});
+  S.highlights=hl.map(verse);S.saved=sv.map(verse);
+  S.readDays=rd.map(r=>{const[y,m,d]=r.day.split('-').map(Number);return y+'-'+m+'-'+d;});
+  S.meditations=md.map(rowMed);S.prayers=pr.map(rowPray);
+  save();
+}
+// 서버 저장 결과 확인. 실패하면 undo로 화면을 되돌리고 알려준다.
+async function sync(req,undo){
+  const {error}=await req;
+  if(!error)return true;
+  if(undo)undo();save();render(false);toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return false;
+}
+// 성경 읽은 날과 마지막 읽은 위치를 서버에 남긴다 (위치는 스크롤이 멈추고 2초 뒤에 한 번).
+function pushReadDay(){sb.from('reading_days').upsert({user_id:S.uid,day:isoDay(Date.now())},{onConflict:'user_id,day',ignoreDuplicates:true}).then(()=>{});}
+let lastReadTm;
+function pushLastRead(){clearTimeout(lastReadTm);lastReadTm=setTimeout(()=>{const l=S.lastRead;sb.from('user_settings').update({last_book:l.b,last_chapter:l.c,last_progress:l.p}).eq('user_id',S.uid).then(()=>{});},2000);}
 
 async function loadBible(){
   const res=await fetch('data/krv.json');if(!res.ok)throw new Error(res.status);
@@ -500,46 +532,13 @@ edit:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>'
 const ic=n=>'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[n]+'</svg>';
 
 /* ============ state ============ */
-const LS='withble.prototype.v1';
+const LS='withble.v2';  // 기기에 남기는 화면용 사본 (프로토타입 때의 'withble.prototype.v1'은 지움)
 const TYPE_EMOJI={'셀/목장':'','교회 부서':'','성경 읽기 모임':'','가족':'','기타':''};
-function seed(){
-  const n=Date.now();const g1='g-sarang',g2='g-teachers';
-  const m=(name,role)=>({name,role:role||'member'});
-  return {
-    loggedIn:false,
-    user:{name:'미미',bio:'말씀으로 함께 걷는 중 '},
-    settings:{notify:true,defVis:'private'},
-    lastRead:{b:JHN,c:3,p:68},
-    readDays:[dayStr(n-D),dayStr(n-2*D),dayStr(n-4*D)],
-    highlights:[{k:keyOf(PSA,23,1),at:n-3*D},{k:keyOf(JHN,3,16),at:n-2*D}],
-    saved:[{k:keyOf(JHN,15,5),at:n-D}],
-    groups:[
-      {id:g1,name:'사랑셀',emoji:'',type:'셀/목장',desc:'금요일 저녁, 말씀과 기도로 모이는 셀',count:8,
-       members:[{name:'미미',role:'leader',me:true},m('재문'),m('영희'),m('민수'),m('지은'),m('하늘'),m('은서'),m('도윤')]},
-      {id:g2,name:'유년부 교사',emoji:'',type:'교회 부서',desc:'유년부 아이들을 함께 섬기는 교사 모임',count:12,
-       members:[m('수진','leader'),{name:'미미',role:'member',me:true},m('정우'),m('하은'),m('서준'),m('예린'),m('지호'),m('다온'),m('윤아'),m('시우'),m('채원'),m('도현')]}
-    ],
-    groupShares:{[g1]:12,[g2]:3},
-    prayers:[
-      {id:'p1',author:'영희',title:'부모님 건강을 위해',body:'이번 주 부모님의 검사가 있습니다. 결과를 담담히 기다릴 수 있도록, 두 분 모두 건강하시도록 함께 기도 부탁드려요.',ref:null,vis:g1,status:'praying',at:n-2*H,rx:{n:6,on:false}},
-      {id:'p2',author:'재문',title:'직장과 지혜',body:'새 프로젝트를 맡게 되었어요. 동료들과 잘 협력하고 지혜롭게 결정할 수 있도록.',ref:{b:JHN,c:15,vs:[5]},vis:g1,status:'praying',at:n-26*H,rx:{n:5,on:false}},
-      {id:'p3',own:true,author:'미미',title:'가족',body:'가족이 한 마음으로 주일 예배를 함께 드릴 수 있도록 기도해요.',ref:null,vis:g1,status:'praying',at:n-30*H,rx:{n:4,on:false}},
-      {id:'p4',author:'지은',title:'시험 기간 체력과 집중',body:'기말 준비로 많이 지쳐 있어요. 체력과 집중력을 위해 기도해주세요.',ref:null,vis:g1,status:'praying',at:n-40*H,rx:{n:3,on:false}},
-      {id:'p5',author:'하늘',title:'새 직장 적응',body:'이직한 지 2주째예요. 새로운 사람들 사이에서 잘 적응하도록.',ref:null,vis:g1,status:'praying',at:n-3*D,rx:{n:4,on:false}},
-      {id:'p6',author:'민수',title:'면접 결과',body:'지난주 면접 결과를 기다리고 있어요.',ref:null,vis:g1,status:'answered',at:n-5*D,rx:{n:9,on:false}},
-      {id:'p7',author:'수진',title:'가을 달란트 잔치 준비',body:'아이들이 즐겁게 말씀을 배우고, 교사들이 지치지 않도록.',ref:null,vis:g2,status:'praying',at:n-20*H,rx:{n:4,on:false}},
-      {id:'p8',own:true,author:'미미',title:'말씀 읽는 습관',body:'매일 아침 한 장씩 읽는 습관이 자리 잡도록.',ref:{b:PSA,c:23,vs:[3]},vis:'private',status:'praying',at:n-2*D,rx:{n:0,on:false}}
-    ],
-    meditations:[
-      {id:'m1',own:true,author:'미미',ref:{b:PSA,c:23,vs:[1]},text:'오늘 이 말씀을 읽으며 \'부족함이 없다\'는 고백이 가진 것이 많아서가 아니라 목자가 누구인지 알기 때문이라는 걸 다시 생각했어요. 이번 주는 부족한 것보다 함께하시는 분을 먼저 보려고 해요.',vis:g1,at:n-4*H,rx:{n:4,on:false}},
-      {id:'m2',author:'재문',ref:{b:JHN,c:15,vs:[5]},text:'나를 떠나서는 아무것도 할 수 없다는 말씀이 오늘은 위로로 들렸어요. 혼자 다 해내려던 마음을 내려놓습니다.',vis:g1,at:n-20*H,rx:{n:3,on:false}},
-      {id:'m3',author:'수진',ref:{b:MAT,c:5,vs:[14]},text:'아이들 한 명 한 명이 세상의 빛이라는 걸 기억하며 이번 주 공과를 준비했어요.',vis:g2,at:n-2*D,rx:{n:5,on:false}},
-      {id:'m4',own:true,author:'미미',ref:{b:JHN,c:3,vs:[16]},text:'\'이처럼\'이라는 말에 오래 머물렀다. 사랑의 크기를 설명하는 대신 행동으로 보여주신 것.',vis:'private',at:n-3*D,rx:{n:0,on:false}}
-    ]
-  };
-}
+// 로그인한 사용자의 빈 상태. 실제 기록은 서버(Supabase)가 원본이고, S는 화면용 사본이다.
+function blank(){return {loggedIn:false,needsConsent:false,uid:null,user:{name:'',bio:'',avatar:null},settings:{notify:true,defVis:'private'},
+  lastRead:{b:JHN,c:3,p:0},readDays:[],highlights:[],saved:[],groups:[],groupShares:{},prayers:[],meditations:[]};}
 let S;
-function load(){try{const raw=localStorage.getItem(LS);if(raw){S=JSON.parse(raw);return;}}catch(e){}S=seed();}
+function load(){try{localStorage.removeItem('withble.prototype.v1');const raw=localStorage.getItem(LS);if(raw){S=Object.assign(blank(),JSON.parse(raw));return;}}catch(e){}S=blank();}
 function save(){try{localStorage.setItem(LS,JSON.stringify(S));}catch(e){}}
 
 const UI={stack:[{name:'home'}],tab:'home',sel:new Set(),recTab:'med',pf:'all',gTab:'home',gpf:'all',testament:'nt',q:'',modal:null,invited:false};
@@ -672,7 +671,7 @@ SC.medEdit=r=>{
   let vis=m?m.vis:(r.vis||S.settings.defVis);if(!visOK(vis))vis='private';
   return hdr(m?'묵상 수정':'묵상 쓰기',{right:'<button class="top-btn" data-a="saveMed">저장</button>'})+
   '<div class="scroll">'+(ref?verseCard(ref):'<div class="field" style="margin-top:4px"><label for="refSel">연결 말씀</label>'+refSelect('refSel')+'</div>')+
-  '<div class="field"><label for="medText">마음에 남은 것</label><textarea class="textarea" id="medText" placeholder="이 말씀을 읽으며 마음에 남은 것을 적어보세요.">'+esc(m?m.text:'')+'</textarea></div>'+
+  '<div class="field"><label for="medText">마음에 남은 것</label><textarea class="textarea" id="medText" maxlength="3000" placeholder="이 말씀을 읽으며 마음에 남은 것을 적어보세요.">'+esc(m?m.text:'')+'</textarea></div>'+
   '<div class="field"><span class="lbl">공개범위</span>'+visChips(vis)+'<p class="help">기본은 나만 보기예요. 모임을 고르면 그 모임 멤버와 함께 봐요.</p></div>'+
   '<div class="form-foot"><button class="btn btn-primary block" data-a="saveMed">'+(m?'수정 완료':'묵상 저장하기')+'</button></div></div>';
 };
@@ -682,7 +681,7 @@ SC.prayEdit=r=>{
   let vis=p?p.vis:(r.vis||S.settings.defVis);if(!visOK(vis))vis='private';
   return hdr(p?'기도 수정':'기도제목 쓰기',{right:'<button class="top-btn" data-a="savePray">저장</button>'})+
   '<div class="scroll"><div class="field" style="margin-top:4px"><label for="prTitle">제목</label><input class="input" id="prTitle" maxlength="40" placeholder="예: 부모님 건강을 위해" value="'+esc(p?p.title:'')+'"></div>'+
-  '<div class="field"><label for="prBody">기도 내용</label><textarea class="textarea short" id="prBody" placeholder="함께 기도할 내용을 적어보세요.">'+esc(p?p.body:'')+'</textarea></div>'+
+  '<div class="field"><label for="prBody">기도 내용</label><textarea class="textarea short" id="prBody" maxlength="3000" placeholder="함께 기도할 내용을 적어보세요.">'+esc(p?p.body:'')+'</textarea></div>'+
   '<div class="field"><span class="lbl">연결 말씀</span>'+(ref?verseCard(ref):(p?'<p class="help" style="margin-top:0">연결된 말씀이 없어요.</p>':refSelect('refSel')))+'</div>'+
   '<div class="field"><span class="lbl">공개범위</span>'+visChips(vis)+'<p class="help">기본은 나만 보기예요. 모임을 고르면 모임 기도 탭에 함께 올라가요.</p></div>'+
   '<div class="form-foot"><button class="btn btn-primary block" data-a="savePray">'+(p?'수정 완료':'기도제목 저장하기')+'</button></div></div>';
@@ -805,8 +804,7 @@ SC.my=()=>{
   '<button class="set-row" data-a="toggleNotify" role="switch" aria-checked="'+S.settings.notify+'"><span class="sr-main">알림<small>모임의 새 기도제목과 묵상 소식</small></span><span class="switch" aria-checked="'+S.settings.notify+'"></span></button>'+
   '<button class="set-row" data-a="defVis"><span class="sr-main">공개범위 기본 설정<small>'+esc(visLabel(S.settings.defVis))+'</small></span>'+ic('right')+'</button>'+
   (isStandalone()?'':'<button class="set-row" data-a="installApp"><span class="sr-main">홈 화면에 추가<small>앱처럼 설치하고, 인터넷 없이도 성경 읽기</small></span>'+ic('right')+'</button>')+
-  '<button class="set-row" data-a="serviceInfo"><span class="sr-main">서비스 정보<small>윗블 프로토타입 v0.1</small></span>'+ic('right')+'</button>'+
-  '<button class="set-row" data-a="resetAll"><span class="sr-main">테스트 데이터 초기화<small>처음 상태로 되돌려요</small></span>'+ic('right')+'</button>'+
+  '<button class="set-row" data-a="serviceInfo"><span class="sr-main">서비스 정보<small>윗블 베타 v0.2</small></span>'+ic('right')+'</button>'+
   '<button class="set-row danger" data-a="logout"><span class="sr-main">로그아웃</span></button></div></div>';
 };
 
@@ -830,10 +828,10 @@ function renderTabbar(){
 }
 function afterRender(r){
   if(r.name==='reader'&&TEXT[r.b+'-'+r.c]){
-    const d=dayStr(Date.now());if(!S.readDays.includes(d))S.readDays.push(d);
+    const d=dayStr(Date.now());if(!S.readDays.includes(d)){S.readDays.push(d);pushReadDay();}
     const sc=$('#readerScroll');
     if(r.restore&&S.lastRead.b===r.b&&S.lastRead.c===r.c){requestAnimationFrame(()=>{sc.scrollTop=(sc.scrollHeight-sc.clientHeight)*S.lastRead.p/100;});}
-    else if(!(S.lastRead.b===r.b&&S.lastRead.c===r.c))S.lastRead={b:r.b,c:r.c,p:0};
+    else if(!(S.lastRead.b===r.b&&S.lastRead.c===r.c)){S.lastRead={b:r.b,c:r.c,p:0};pushLastRead();}
     save();
     if(r.focus){const el=document.getElementById('v-'+r.focus);if(el){requestAnimationFrame(()=>{el.scrollIntoView({block:'center'});el.classList.add('flash');});}}
   }
@@ -875,6 +873,26 @@ function kakao(o){
 }
 function copy(text,msg){const ok=()=>toast(msg||'링크를 복사했어요');try{if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(ok,()=>toast((msg||'링크를 복사했어요')+' (Mock)'));return;}}catch(e){}toast((msg||'링크를 복사했어요')+' (Mock)');}
 
+/* ============ 서버에 저장하는 동작 도우미 ============ */
+// 선택한 구절들을 하이라이트/저장하거나 해제한다. list: S의 목록 이름, table: 서버 표 이름
+function toggleVerses(list,table,has,onMsg,offMsg){
+  const r=cur(),vs=[...UI.sel].sort((a,b)=>a-b),keys=vs.map(v=>keyOf(r.b,r.c,v)),all=keys.every(has),before=S[list].slice();
+  let req;
+  if(all){S[list]=S[list].filter(h=>!keys.includes(h.k));req=sb.from(table).delete().eq('user_id',S.uid).eq('book',r.b).eq('chapter',r.c).in('verse',vs);}
+  else{const add=vs.filter(v=>!has(keyOf(r.b,r.c,v)));add.forEach(v=>S[list].push({k:keyOf(r.b,r.c,v),at:Date.now()}));
+    req=sb.from(table).upsert(add.map(v=>({user_id:S.uid,book:r.b,chapter:r.c,verse:v})),{onConflict:'user_id,book,chapter,verse',ignoreDuplicates:true});}
+  save();UI.sel.clear();render(false);
+  sync(req,()=>{S[list]=before;}).then(ok=>{if(ok)toast(all?offMsg:onMsg);});
+}
+function removeVerse(list,table,k,msg){
+  const [b,c,v]=parseKey(k),before=S[list].slice();S[list]=S[list].filter(h=>h.k!==k);save();render(false);
+  sync(sb.from(table).delete().eq('user_id',S.uid).eq('book',b).eq('chapter',c).eq('verse',v),()=>{S[list]=before;}).then(ok=>{if(ok)toast(msg);});
+}
+function setPrayStatus(id,status,msg){
+  const p=findP(id),old=p.status;p.status=status;save();render(false);
+  sync(sb.from('prayers').update({status}).eq('id',id),()=>{p.status=old;}).then(ok=>{if(ok)toast(msg);});
+}
+
 /* ============ actions ============ */
 const A={
   consentMore(d){const c=CONSENTS.find(x=>x.k===d.k);if(c)modal({title:c.t,body:c.body,actions:[{label:'확인',kind:'primary'}]});},
@@ -886,17 +904,17 @@ const A={
     rows.push({item:'photo',version:CONSENT_VERSION,agreed:!!S.user.avatar},{item:'email',version:CONSENT_VERSION,agreed:!!(session&&session.user.email)});
     const {error}=await sb.from('consents').insert(rows);
     if(error){el.disabled=false;el.textContent='동의하고 시작하기';toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return;}
-    S.consentVersion=CONSENT_VERSION;S.needsConsent=false;save();UI.tab='home';UI.stack=[{name:'home'}];render();toast(S.user.name+'님, 환영해요');
+    S.consentVersion=CONSENT_VERSION;S.needsConsent=false;await loadMine();save();UI.tab='home';UI.stack=[{name:'home'}];render();toast(S.user.name+'님, 환영해요');
   },
   consentDecline(){confirmModal('동의하지 않고 나갈까요?','필수 항목에 동의하지 않으면 윗블을 이용할 수 없어요. 방금 만들어진 계정 정보는 바로 삭제돼요.','나가기',async()=>{
     await sb.rpc('delete_account');await sb.auth.signOut({scope:'local'}).catch(()=>{});
-    S.loggedIn=false;S.needsConsent=false;save();render();toast('계정 정보를 삭제했어요');
+    S=blank();save();render();toast('계정 정보를 삭제했어요');
   });},
   async login(d,el){el.disabled=true;el.textContent='카카오로 이동 중…';
     const {error}=await sb.auth.signInWithOAuth({provider:'kakao',options:{redirectTo:location.origin}});
     if(error){el.disabled=false;el.textContent='카카오로 시작하기';toast('로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요');}
   },
-  logout(){confirmModal('로그아웃할까요?','기록은 이 브라우저에 그대로 남아 있어요.','로그아웃',async()=>{await sb.auth.signOut().catch(()=>{});S.loggedIn=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();toast('로그아웃했어요');},'primary');},
+  logout(){confirmModal('로그아웃할까요?','기록은 서버에 안전하게 남아 있어요. 다시 로그인하면 그대로 볼 수 있어요.','로그아웃',async()=>{await sb.auth.signOut().catch(()=>{});S=blank();save();UI.stack=[{name:'home'}];UI.tab='home';render();toast('로그아웃했어요');},'primary');},
   tab(d){tab(d.t);},
   back(){back();},
   closeModal(){closeModal();},
@@ -920,14 +938,8 @@ const A={
     document.querySelectorAll('.chapter .v').forEach(p=>{const on=UI.sel.has(+p.dataset.v);p.classList.toggle('sel',on);p.setAttribute('aria-pressed',on);});
     renderActionBar();},
   clearSel(){UI.sel.clear();document.querySelectorAll('.v.sel').forEach(e=>{e.classList.remove('sel');e.setAttribute('aria-pressed','false');});renderActionBar();},
-  selHighlight(){const r=cur();const keys=[...UI.sel].map(v=>keyOf(r.b,r.c,v));const all=keys.every(isHl);
-    if(all){S.highlights=S.highlights.filter(h=>!keys.includes(h.k));toast('하이라이트를 해제했어요');}
-    else{keys.forEach(k=>{if(!isHl(k))S.highlights.push({k,at:Date.now()});});toast('하이라이트했어요. 기록에서 볼 수 있어요');}
-    save();UI.sel.clear();render(false);},
-  selSave(){const r=cur();const keys=[...UI.sel].map(v=>keyOf(r.b,r.c,v));const all=keys.every(isSaved);
-    if(all){S.saved=S.saved.filter(h=>!keys.includes(h.k));toast('저장을 해제했어요');}
-    else{keys.forEach(k=>{if(!isSaved(k))S.saved.push({k,at:Date.now()});});toast('말씀을 저장했어요');}
-    save();UI.sel.clear();render(false);},
+  selHighlight(){toggleVerses('highlights','highlights',isHl,'하이라이트했어요. 기록에서 볼 수 있어요','하이라이트를 해제했어요');},
+  selSave(){toggleVerses('saved','saved_verses',isSaved,'말씀을 저장했어요','저장을 해제했어요');},
   selMed(){const r=cur();go('medEdit',{ref:{b:r.b,c:r.c,vs:[...UI.sel].sort((a,b)=>a-b)}});},
   selPray(){const r=cur();go('prayEdit',{ref:{b:r.b,c:r.c,vs:[...UI.sel].sort((a,b)=>a-b)}});},
   selShare(){const r=cur();go('shareVerse',{ref:{b:r.b,c:r.c,vs:[...UI.sel].sort((a,b)=>a-b)}});},
@@ -944,31 +956,40 @@ const A={
   /* compose */
   newMed(d){const vis=d&&d.vis;go('medEdit',vis?{vis,ref:TODAY_REF}:{});},
   newPray(d){const vis=d&&d.vis;go('prayEdit',vis?{vis}:{});},
-  saveMed(){const r=cur();const ta=$('#medText');const text=ta.value.trim();if(!text){toast('묵상 내용을 적어주세요');ta.focus();return;}
+  async saveMed(){if(UI.saving)return;const r=cur();const ta=$('#medText');const text=ta.value.trim();if(!text){toast('묵상 내용을 적어주세요');ta.focus();return;}
     const vis=(document.querySelector('input[name=vis]:checked')||{}).value||'private';
     let ref=r.ref||null;const sel=$('#refSel');if(sel)ref=sel.value==='none'?null:PRESETS[+sel.value];
-    if(r.id){const m=findM(r.id);m.text=text;m.vis=vis;save();UI.stack.pop();render();toast('묵상을 수정했어요');return;}
-    const m={id:uid('m'),own:true,author:S.user.name,ref,text,vis,at:Date.now(),rx:{n:0,on:false}};S.meditations.push(m);save();
+    const gid=vis==='private'?null:vis;
+    if(r.id){const m=findM(r.id);const old={text:m.text,vis:m.vis};m.text=text;m.vis=vis;save();UI.stack.pop();render();
+      if(await sync(sb.from('meditations').update({body:text,group_id:gid}).eq('id',m.id),()=>Object.assign(m,old)))toast('묵상을 수정했어요');return;}
+    UI.saving=true;const {data:row,error}=await sb.from('meditations').insert(Object.assign({body:text,group_id:gid},refCols(ref))).select().single();UI.saving=false;
+    if(error){toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return;}
+    const m=rowMed(row);S.meditations.push(m);save();
     replace('medDetail',{id:m.id});toast(vis==='private'?'묵상을 저장했어요':'저장하고 '+josa(grp(vis).name,'과','와')+' 나눴어요');},
-  savePray(){const r=cur();const ti=$('#prTitle'),bo=$('#prBody');const title=ti.value.trim(),body=bo.value.trim();
+  async savePray(){if(UI.saving)return;const r=cur();const ti=$('#prTitle'),bo=$('#prBody');const title=ti.value.trim(),body=bo.value.trim();
     if(!title){toast('기도 제목을 적어주세요');ti.focus();return;}
     if(!body){toast('기도 내용을 적어주세요');bo.focus();return;}
     const vis=(document.querySelector('input[name=vis]:checked')||{}).value||'private';
     let ref=r.ref||null;const sel=$('#refSel');if(sel)ref=sel.value==='none'?null:PRESETS[+sel.value];
-    if(r.id){const p=findP(r.id);p.title=title;p.body=body;p.vis=vis;save();UI.stack.pop();render();toast('기도제목을 수정했어요');return;}
-    const p={id:uid('p'),own:true,author:S.user.name,title,body,ref,vis,status:'praying',at:Date.now(),rx:{n:0,on:false}};S.prayers.push(p);save();
+    const gid=vis==='private'?null:vis;
+    if(r.id){const p=findP(r.id);const old={title:p.title,body:p.body,vis:p.vis};p.title=title;p.body=body;p.vis=vis;save();UI.stack.pop();render();
+      if(await sync(sb.from('prayers').update({title,body,group_id:gid}).eq('id',p.id),()=>Object.assign(p,old)))toast('기도제목을 수정했어요');return;}
+    UI.saving=true;const {data:row,error}=await sb.from('prayers').insert(Object.assign({title,body,group_id:gid},refCols(ref))).select().single();UI.saving=false;
+    if(error){toast('저장하지 못했어요. 인터넷 연결을 확인해 주세요');return;}
+    const p=rowPray(row);S.prayers.push(p);save();
     replace('prayDetail',{id:p.id});toast(vis==='private'?'기도제목을 저장했어요':''+grp(vis).name+' 기도 탭에 올렸어요');},
   openMed(d){go('medDetail',{id:d.id});},
   openPray(d){go('prayDetail',{id:d.id});},
   editMed(d){go('medEdit',{id:d.id});},
   editPray(d){go('prayEdit',{id:d.id});},
-  delMed(d){confirmModal('이 묵상을 삭제할까요?','삭제하면 다시 복구할 수 없어요.','삭제',()=>{S.meditations=S.meditations.filter(m=>m.id!==d.id);save();back();toast('묵상을 삭제했어요');});},
-  delPray(d){confirmModal('이 기도제목을 삭제할까요?','삭제하면 다시 복구할 수 없어요.','삭제',()=>{S.prayers=S.prayers.filter(p=>p.id!==d.id);save();back();toast('기도제목을 삭제했어요');});},
-  answer(d){modal({title:'기도가 응답되었나요? ',body:'<p class="muted">응답된 기도는 응답됨으로 표시되고, 공개한 모임에도 함께 보여요.</p>',actions:[{label:'아직 기도 중이에요'},{label:'응답되었어요',kind:'primary',fn:()=>{const p=findP(d.id);p.status='answered';save();render(false);toast('응답된 기도로 기록했어요');}}]});},
-  unanswer(d){const p=findP(d.id);p.status='praying';save();render(false);toast('기도 중으로 되돌렸어요');},
+  delMed(d){confirmModal('이 묵상을 삭제할까요?','삭제하면 다시 복구할 수 없어요.','삭제',async()=>{const {error}=await sb.from('meditations').delete().eq('id',d.id);if(error){toast('삭제하지 못했어요. 인터넷 연결을 확인해 주세요');return;}S.meditations=S.meditations.filter(m=>m.id!==d.id);save();back();toast('묵상을 삭제했어요');});},
+  delPray(d){confirmModal('이 기도제목을 삭제할까요?','삭제하면 다시 복구할 수 없어요.','삭제',async()=>{const {error}=await sb.from('prayers').delete().eq('id',d.id);if(error){toast('삭제하지 못했어요. 인터넷 연결을 확인해 주세요');return;}S.prayers=S.prayers.filter(p=>p.id!==d.id);save();back();toast('기도제목을 삭제했어요');});},
+  answer(d){modal({title:'기도가 응답되었나요? ',body:'<p class="muted">응답된 기도는 응답됨으로 표시되고, 공개한 모임에도 함께 보여요.</p>',actions:[{label:'아직 기도 중이에요'},{label:'응답되었어요',kind:'primary',fn:()=>{setPrayStatus(d.id,'answered','응답된 기도로 기록했어요');}}]});},
+  unanswer(d){setPrayStatus(d.id,'praying','기도 중으로 되돌렸어요');},
   changeVis(d){const x=d.k==='m'?findM(d.id):findP(d.id);
     modal({title:'공개범위',body:'<p class="muted">누구와 함께 볼지 선택하세요.</p><div class="targets">'+[['private','나만 보기'],...S.groups.map(g=>[g.id,g.name])].map(([v,l])=>'<label class="target"><input type="radio" name="cv" value="'+v+'" '+(x.vis===v?'checked':'')+'><span>'+esc(l)+'</span></label>').join('')+'</div>',
-      actions:[{label:'취소'},{label:'변경',kind:'primary',fn:()=>{const v=document.querySelector('input[name=cv]:checked').value;if(v===x.vis)return;x.vis=v;save();render(false);toast('공개범위를 ‘'+visLabel(v)+'’로 바꿨어요');}}]});},
+      actions:[{label:'취소'},{label:'변경',kind:'primary',fn:()=>{const v=document.querySelector('input[name=cv]:checked').value;if(v===x.vis)return;const old=x.vis;x.vis=v;save();render(false);
+        sync(sb.from(d.k==='m'?'meditations':'prayers').update({group_id:v==='private'?null:v}).eq('id',x.id),()=>{x.vis=old;}).then(ok=>{if(ok)toast('공개범위를 ‘'+visLabel(v)+'’로 바꿨어요');});}}]});},
   react(d,el){const x=d.k==='m'?findM(d.id):findP(d.id);if(!x)return;x.rx.on=!x.rx.on;x.rx.n+=x.rx.on?1:-1;save();
     document.querySelectorAll('.react[data-id="'+d.id+'"]').forEach(b=>{b.classList.toggle('on',x.rx.on);b.setAttribute('aria-pressed',x.rx.on);b.querySelector('.rc').textContent=x.rx.n;b.classList.remove('pop');void b.offsetWidth;if(x.rx.on)b.classList.add('pop');});
     toast(x.rx.on?(d.k==='m'?'은혜받았어요':'함께 기도하고 있어요'):'반응을 취소했어요');},
@@ -976,13 +997,13 @@ const A={
   recTab(d){UI.recTab=d.t;render(false);},
   goRecords(d){UI.recTab=d.t;tab('records');},
   prayFilter(d){UI.pf=d.f;render(false);},
-  removeHl(d){S.highlights=S.highlights.filter(h=>h.k!==d.k);save();render(false);toast('하이라이트를 해제했어요');},
-  removeSaved(d){S.saved=S.saved.filter(h=>h.k!==d.k);save();render(false);toast('저장을 해제했어요');},
+  removeHl(d){removeVerse('highlights','highlights',d.k,'하이라이트를 해제했어요');},
+  removeSaved(d){removeVerse('saved','saved_verses',d.k,'저장을 해제했어요');},
   /* groups */
   openGroup(d){UI.gTab=d.tab||'home';UI.gpf='all';go('group',{gid:d.id});},
   gTab(d){UI.gTab=d.t;render(false);},
   gPrayFilter(d){UI.gpf=d.f;render(false);},
-  newGroup(){go('groupNew');},
+  newGroup(){toast('모임 기능은 곧 열려요');},
   createGroup(){const ni=$('#gName');const name=ni.value.trim();if(!name){toast('모임 이름을 적어주세요');ni.focus();return;}
     const type=document.querySelector('input[name=gtype]:checked').value;const desc=$('#gDesc').value.trim();
     const g={id:uid('g'),name,emoji:TYPE_EMOJI[type],type,desc,count:1,members:[{name:S.user.name,role:'leader',me:true}]};
@@ -994,9 +1015,11 @@ const A={
       after:()=>{UI.invited=true;if(cur().name==='groupCreated')render(false);mockJoin(g);}});},
   copyInvite(d){copy('https://withble.app/invite/'+d.id,'초대 링크를 복사했어요');UI.invited=true;if(cur().name==='groupCreated')render(false);},
   /* my */
-  toggleNotify(){S.settings.notify=!S.settings.notify;save();render(false);toast(S.settings.notify?'알림을 켰어요':'알림을 껐어요');},
+  toggleNotify(){const v=!S.settings.notify;S.settings.notify=v;save();render(false);
+    sync(sb.from('user_settings').update({notify:v}).eq('user_id',S.uid),()=>{S.settings.notify=!v;}).then(ok=>{if(ok)toast(v?'알림을 켰어요':'알림을 껐어요');});},
   defVis(){modal({title:'공개범위 기본 설정',body:'<p class="muted">새 묵상·기도를 쓸 때 처음 선택될 공개범위예요. 글마다 바꿀 수 있어요.</p><div class="targets">'+[['private','나만 보기 (권장)'],...S.groups.map(g=>[g.id,g.name])].map(([v,l])=>'<label class="target"><input type="radio" name="dv" value="'+v+'" '+(S.settings.defVis===v?'checked':'')+'><span>'+esc(l)+'</span></label>').join('')+'</div>',
-    actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{S.settings.defVis=document.querySelector('input[name=dv]:checked').value;save();render(false);toast('기본 공개범위를 저장했어요');}}]});},
+    actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const v=document.querySelector('input[name=dv]:checked').value,old=S.settings.defVis;S.settings.defVis=v;save();render(false);
+      sync(sb.from('user_settings').update({def_vis:v}).eq('user_id',S.uid),()=>{S.settings.defVis=old;}).then(ok=>{if(ok)toast('기본 공개범위를 저장했어요');});}}]});},
   installApp(){
     if(installEvt){installEvt.prompt();installEvt.userChoice.then(r=>{if(r.outcome==='accepted')toast('홈 화면에 윗블을 추가했어요');});installEvt=null;return;}
     const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
@@ -1005,10 +1028,10 @@ const A={
     const note=ios?'카카오톡 등 다른 앱 안에서 열었다면, 먼저 Safari로 열어 주세요.':'카카오톡 안에서 열었다면, 먼저 Chrome이나 삼성 인터넷으로 열어 주세요.';
     modal({title:'홈 화면에 윗블 추가하기',body:steps.map((t,i)=>'<p>'+(i+1)+'. '+t+'</p>').join('')+'<p class="muted" style="margin-top:10px;font-size:14px">'+note+'</p>',actions:[{label:'확인',kind:'primary'}]});
   },
-  serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">프로토타입 v0.1 · 성경 본문 개역한글(66권 전체)<br>모든 기록은 이 브라우저에만 저장되며, 카카오 로그인·공유·초대는 시뮬레이션이에요.</p>',actions:[{label:'닫기',kind:'primary'}]});},
+  serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">베타 v0.2 · 성경 본문 개역한글(66권 전체)<br>기록은 윗블 서버에 저장돼요. 카카오톡 공유는 아직 시뮬레이션이에요.</p><p style="margin-top:10px;font-size:14px"><a class="agree-link" href="'+PRIVACY_URL+'" target="_blank" rel="noopener">개인정보 처리방침</a></p>',actions:[{label:'닫기',kind:'primary'}]});},
   editProfile(){modal({title:'프로필 편집',body:'<div class="field" style="margin-top:6px"><label for="pfName">이름</label><input class="input" id="pfName" maxlength="12" value="'+esc(S.user.name)+'"></div><div class="field"><label for="pfBio">한 줄 소개</label><input class="input" id="pfBio" maxlength="30" value="'+esc(S.user.bio)+'"></div>',
-    actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}S.user.name=n;S.user.bio=$('#pfBio').value.trim()||'말씀으로 함께 걷는 중 ';save();render(false);toast('프로필을 저장했어요');}}]});},
-  resetAll(){confirmModal('테스트 데이터를 초기화할까요?','작성한 묵상·기도·모임이 모두 지워지고 처음 상태로 돌아가요.','초기화',()=>{try{localStorage.removeItem(LS);}catch(e){}const li=S.loggedIn;S=seed();S.loggedIn=li;save();Object.assign(UI,{stack:[{name:'home'}],tab:'home',recTab:'med',pf:'all',gTab:'home',gpf:'all',q:'',invited:false});UI.sel.clear();render();toast('테스트 데이터를 초기화했어요');});},
+    actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}const bio=$('#pfBio').value.trim(),old={name:S.user.name,bio:S.user.bio};S.user.name=n;S.user.bio=bio;save();render(false);
+      sync(sb.from('profiles').update({name:n,bio}).eq('id',S.uid),()=>Object.assign(S.user,old)).then(ok=>{if(ok)toast('프로필을 저장했어요');});}}]});},
 };
 function mockJoin(g){
   const pool=['재문','영희','민수','지은','하늘'].filter(n=>!g.members.some(m=>m.name===n));
@@ -1032,7 +1055,7 @@ let readTm;
 document.addEventListener('scroll',e=>{
   const sc=e.target;if(!sc||sc.id!=='readerScroll')return;const r=cur();if(r.name!=='reader'||!TEXT[r.b+'-'+r.c])return;
   const max=sc.scrollHeight-sc.clientHeight;if(max<=0)return;
-  S.lastRead={b:r.b,c:r.c,p:Math.min(100,Math.round(sc.scrollTop/max*100))};clearTimeout(readTm);readTm=setTimeout(save,250);
+  S.lastRead={b:r.b,c:r.c,p:Math.min(100,Math.round(sc.scrollTop/max*100))};clearTimeout(readTm);readTm=setTimeout(save,250);pushLastRead();
 },true);
 document.addEventListener('input',e=>{
   if(e.target.name==='agree'||e.target.id==='agreeAll')syncConsent(e.target);
