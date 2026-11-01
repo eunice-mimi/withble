@@ -43,6 +43,14 @@ With + Bible. 성경을 읽고, 묵상과 기도제목을 모임(셀·부서·�
 - MY > 홈 화면에 추가: 안드로이드 크롬은 설치 창, 아이폰은 안내 모달 (`A.installApp`).
 - 개인정보 처리방침·가입 동의 문구 초안: `legal/` (README 참고).
 
+## Supabase (진행 중)
+
+- `supabase/001_schema.sql`: 표·RLS·RPC. 사용자가 SQL Editor에서 한 번 실행. 이후 변경은 `002_...sql` 새 파일로.
+- `supabase/test_security.sql`: RLS 시험 (rollback으로 끝남). 스키마를 바꾸면 시험도 추가하고 다시 돌릴 것.
+  - 로컬 검증: Homebrew `postgresql@17` 설치되어 있음. Supabase의 auth 스키마·역할을 흉내 내는 설정을 먼저 실행한 뒤 돌림.
+- 저장소가 **공개**이므로 anon key만 코드에 넣고, service_role key는 절대 넣지 말 것.
+- 사용자에게 보이는 글(다른 사람이 쓴 묵상·기도·이름)은 반드시 `esc()`로 그릴 것 (XSS).
+
 ## 디자인 시스템
 
 - 컨셉: 현대카드 스타일. **컬러 없이 블랙 메인** (예외: 카카오 공유 버튼의 노란색만).
