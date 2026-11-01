@@ -118,6 +118,7 @@ begin
   insert into public.meditations (body, group_id, ref_book, ref_chapter, ref_verses) values ('목자 되신 주님', gid, 18, 23, '{1}');
   insert into public.highlights (book, chapter, verse) values (18, 23, 1);
   insert into public.consents (item, version, agreed) values ('sensitive', 'v0.1', true);
+  insert into public.consents (item, version, agreed) values ('email', 'v0.1', false);
 
   begin
     insert into public.consents (user_id, item, version, agreed)
