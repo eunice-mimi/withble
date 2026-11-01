@@ -947,6 +947,8 @@ document.addEventListener('input',e=>{
   if(e.target.id==='searchInput'){UI.q=e.target.value;$('#searchResults').innerHTML=searchResults();}
 });
 
+// 웹앱: 서비스 워커 등록 (오프라인 저장, sw.js 참고)
+if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 load();
 $('#app').innerHTML='<div class="empty"><h4>성경 본문을 불러오는 중이에요</h4></div>';
 loadBible().then(render).catch(()=>{
