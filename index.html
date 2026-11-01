@@ -453,8 +453,9 @@ async function loadProfile(uid){
 const isoDay=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const rowRef=r=>r.ref_book==null?null:{b:r.ref_book,c:r.ref_chapter,vs:r.ref_verses||[1]};
 const refCols=ref=>ref?{ref_book:ref.b,ref_chapter:ref.c,ref_verses:ref.vs}:{ref_book:null,ref_chapter:null,ref_verses:null};
-const rowMed=r=>({id:r.id,own:r.author_id===S.uid,author:S.user.name,ref:rowRef(r),text:r.body,vis:r.group_id||'private',at:Date.parse(r.created_at),rx:{n:0,on:false}});
-const rowPray=r=>({id:r.id,own:r.author_id===S.uid,author:S.user.name,title:r.title,body:r.body,ref:rowRef(r),vis:r.group_id||'private',status:r.status,at:Date.parse(r.created_at),rx:{n:0,on:false}});
+const authorName=id=>id===S.uid?S.user.name:((S.names||{})[id]||'이전 멤버');
+const rowMed=r=>({id:r.id,own:r.author_id===S.uid,author:authorName(r.author_id),ref:rowRef(r),text:r.body,vis:r.group_id||'private',at:Date.parse(r.created_at),rx:{n:0,on:false}});
+const rowPray=r=>({id:r.id,own:r.author_id===S.uid,author:authorName(r.author_id),title:r.title,body:r.body,ref:rowRef(r),vis:r.group_id||'private',status:r.status,at:Date.parse(r.created_at),rx:{n:0,on:false}});
 async function loadMine(){
   const since=isoDay(Date.now()-60*D);
   const res=await Promise.all([
@@ -474,6 +475,7 @@ async function loadMine(){
   S.meditations=md.map(rowMed);S.prayers=pr.map(rowPray);
   save();
   await loadGroups();
+  await loadFeed();
 }
 // 내가 속한 모임과 멤버 이름을 가져온다.
 async function loadGroups(){
@@ -481,10 +483,38 @@ async function loadGroups(){
   if(error)return;
   const ids=[...new Set(gs.flatMap(g=>g.group_members.map(m=>m.user_id)))];
   const {data:ps}=ids.length?await sb.from('profiles').select('id,name').in('id',ids):{data:[]};
-  const nm=Object.fromEntries((ps||[]).map(x=>[x.id,x.name]));
+  const nm=Object.fromEntries((ps||[]).map(x=>[x.id,x.name]));S.names=nm;
   S.groups=gs.map(g=>({id:g.id,name:g.name,type:g.type,desc:g.description,count:g.group_members.length,
     members:g.group_members.sort((a,b)=>a.joined_at<b.joined_at?-1:1).map(m=>({id:m.user_id,name:nm[m.user_id]||'멤버',role:m.role,me:m.user_id===S.uid}))}));
   save();
+}
+// 내 모임에 공개된 글(다른 멤버 글 포함)과 반응을 가져온다. 내 글은 그대로 두고 남의 글은 새로 받은 것으로 바꾼다.
+async function loadFeed(){
+  const gids=S.groups.map(g=>g.id);
+  let md=[],pr=[];
+  if(gids.length){
+    const [a,b]=await Promise.all([
+      sb.from('meditations').select('*').in('group_id',gids).order('created_at',{ascending:false}).limit(300),
+      sb.from('prayers').select('*').in('group_id',gids).order('created_at',{ascending:false}).limit(300),
+    ]);
+    if(a.error||b.error)return;
+    md=a.data;pr=b.data;
+  }
+  const merge=(mine,rows,conv)=>{const m=new Map(mine.filter(x=>x.own).map(x=>[x.id,x]));rows.forEach(r=>m.set(r.id,conv(r)));return [...m.values()];};
+  S.meditations=merge(S.meditations,md,rowMed);S.prayers=merge(S.prayers,pr,rowPray);
+  // 반응: 보안 규칙상 내가 볼 수 있는 글의 반응만 온다
+  const {data:rx,error}=await sb.from('reactions').select('meditation_id,prayer_id,user_id');
+  if(!error){
+    const cnt={};rx.forEach(r=>{const id=r.meditation_id||r.prayer_id;const c=cnt[id]||(cnt[id]={n:0,on:false});c.n++;if(r.user_id===S.uid)c.on=true;});
+    [...S.meditations,...S.prayers].forEach(x=>{x.rx=cnt[x.id]?{n:cnt[x.id].n,on:cnt[x.id].on}:{n:0,on:false};});
+  }
+  UI.feedAt=Date.now();save();
+}
+// 홈·모임·알림 화면을 열 때, 30초가 지났으면 새 글을 다시 가져와 화면을 고친다.
+function refreshFeed(r){
+  if(!S.loggedIn||S.needsConsent||Date.now()-(UI.feedAt||0)<30000)return;
+  UI.feedAt=Date.now();
+  loadGroups().then(loadFeed).then(()=>{if(cur()===r)render(false);});
 }
 // 초대: 링크(https://.../?join=코드)는 모임 화면을 열 때 미리 만들어 둔다.
 // (아이폰은 버튼을 누른 순간에만 공유 창을 열 수 있어서, 누른 뒤 서버를 기다리면 막힌다)
@@ -889,6 +919,7 @@ function afterRender(r){
     if(r.focus){const el=document.getElementById('v-'+r.focus);if(el){requestAnimationFrame(()=>{el.scrollIntoView({block:'center'});el.classList.add('flash');});}}
   }
   if((r.name==='group'||r.name==='groupCreated')&&S.loggedIn)prefetchInvite(r.gid);
+  if(['home','groups','group','notifs'].includes(r.name))refreshFeed(r);
   if(r.name==='invite'&&!r.p&&!r.err)loadInvitePreview(r);
   if(r.name==='search'){const i=$('#searchInput');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
 }
@@ -1045,9 +1076,11 @@ const A={
     modal({title:'공개범위',body:'<p class="muted">누구와 함께 볼지 선택하세요.</p><div class="targets">'+[['private','나만 보기'],...S.groups.map(g=>[g.id,g.name])].map(([v,l])=>'<label class="target"><input type="radio" name="cv" value="'+v+'" '+(x.vis===v?'checked':'')+'><span>'+esc(l)+'</span></label>').join('')+'</div>',
       actions:[{label:'취소'},{label:'변경',kind:'primary',fn:()=>{const v=document.querySelector('input[name=cv]:checked').value;if(v===x.vis)return;const old=x.vis;x.vis=v;save();render(false);
         sync(sb.from(d.k==='m'?'meditations':'prayers').update({group_id:v==='private'?null:v}).eq('id',x.id),()=>{x.vis=old;}).then(ok=>{if(ok)toast('공개범위를 ‘'+visLabel(v)+'’로 바꿨어요');});}}]});},
-  react(d,el){const x=d.k==='m'?findM(d.id):findP(d.id);if(!x)return;x.rx.on=!x.rx.on;x.rx.n+=x.rx.on?1:-1;save();
+  react(d,el){const x=d.k==='m'?findM(d.id):findP(d.id);if(!x)return;const on=!x.rx.on;x.rx.on=on;x.rx.n+=on?1:-1;save();
     document.querySelectorAll('.react[data-id="'+d.id+'"]').forEach(b=>{b.classList.toggle('on',x.rx.on);b.setAttribute('aria-pressed',x.rx.on);b.querySelector('.rc').textContent=x.rx.n;b.classList.remove('pop');void b.offsetWidth;if(x.rx.on)b.classList.add('pop');});
-    toast(x.rx.on?(d.k==='m'?'은혜받았어요':'함께 기도하고 있어요'):'반응을 취소했어요');},
+    const col=d.k==='m'?'meditation_id':'prayer_id';
+    sync(on?sb.from('reactions').insert({[col]:x.id}):sb.from('reactions').delete().eq('user_id',S.uid).eq(col,x.id),()=>{x.rx.on=!on;x.rx.n+=on?-1:1;})
+      .then(ok=>{if(ok)toast(on?(d.k==='m'?'은혜받았어요':'함께 기도하고 있어요'):'반응을 취소했어요');});},
   /* records */
   recTab(d){UI.recTab=d.t;render(false);},
   goRecords(d){UI.recTab=d.t;tab('records');},
@@ -1078,7 +1111,7 @@ const A={
     if(error){el.disabled=false;toast(rpcMsg(error,'들어가지 못했어요. 인터넷 연결을 확인해 주세요'));return;}
     await loadGroups();const g=grp(gid);UI.gTab='home';UI.gpf='all';UI.stack=[{name:'groups'},{name:'group',gid}];render();if(g)toast(josa(g.name,'에','에')+' 들어왔어요');},
   leaveGroup(d){const g=grp(d.id);if(!g)return;const leader=g.members.some(m=>m.me&&m.role==='leader');
-    confirmModal(josa(g.name,'에서','에서')+' 나갈까요?','내가 이 모임에 공개한 묵상·기도는 나만 보기로 바뀌어요.'+(leader&&g.count>1?' 모임장 역할은 가장 먼저 들어온 멤버에게 넘어가요.':'')+(g.count===1?' 마지막 멤버라 모임이 삭제돼요.':''),'나가기',async()=>{
+    confirmModal(esc(josa(g.name,'에서','에서'))+' 나갈까요?','내가 이 모임에 공개한 묵상·기도는 나만 보기로 바뀌어요.'+(leader&&g.count>1?' 모임장 역할은 가장 먼저 들어온 멤버에게 넘어가요.':'')+(g.count===1?' 마지막 멤버라 모임이 삭제돼요.':''),'나가기',async()=>{
       const {error}=await sb.rpc('leave_group',{p_group:g.id});
       if(error){toast(rpcMsg(error,'나가지 못했어요. 인터넷 연결을 확인해 주세요'));return;}
       [...S.meditations,...S.prayers].forEach(x=>{if(x.own&&x.vis===g.id)x.vis='private';});
