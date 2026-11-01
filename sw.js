@@ -4,13 +4,14 @@
  *   → 성경 데이터나 아이콘을 바꿨으면 아래 VERSION 숫자를 올려야 새 파일로 교체된다.
  * - 구글 폰트: 처음 받을 때 저장해 두고 재사용
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'withble-' + VERSION;
 const FONT_CACHE = 'withble-fonts';
 const PRECACHE = [
   './',
   'index.html',
   'manifest.webmanifest',
+  'vendor/supabase-js-2.117.3.js',
   'data/krv.json',
   'icons/icon-192.png',
   'icons/icon-512.png',

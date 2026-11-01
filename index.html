@@ -391,6 +391,7 @@ h1,h2,h3,h4,p{margin:0}
   </aside>
 </div>
 
+<script src="vendor/supabase-js-2.117.3.js"></script>
 <script>
 /* ============ Bible data (개역한글, 일부 장) ============ */
 const OT=[['창세기',50],['출애굽기',40],['레위기',27],['민수기',36],['신명기',34],['여호수아',24],['사사기',21],['룻기',4],['사무엘상',31],['사무엘하',24],['열왕기상',22],['열왕기하',25],['역대상',29],['역대하',36],['에스라',10],['느헤미야',13],['에스더',10],['욥기',42],['시편',150],['잠언',31],['전도서',12],['아가',8],['이사야',66],['예레미야',52],['예레미야애가',5],['에스겔',48],['다니엘',12],['호세아',14],['요엘',3],['아모스',9],['오바댜',1],['요나',4],['미가',7],['나훔',3],['하박국',3],['스바냐',3],['학개',2],['스가랴',14],['말라기',4]];
@@ -399,6 +400,34 @@ const BOOKS=[...OT.map(([n,c])=>({name:n,ch:c,t:'ot'})),...NT.map(([n,c])=>({nam
 const PSA=BOOKS.findIndex(b=>b.name==='시편'), MAT=BOOKS.findIndex(b=>b.name==='마태복음'), JHN=BOOKS.findIndex(b=>b.name==='요한복음');
 const TEXT={};
 /* 성경 본문: data/krv.json(개역한글 전체)을 읽어 TEXT['책인덱스-장']={v:[절...], title?}로 채움 */
+/* ============ Supabase (로그인·서버 저장) ============ */
+// 공개용(publishable) 키라 코드에 넣어도 안전함. 비밀 키(secret, service_role)는 절대 넣지 말 것.
+const SUPABASE_URL='https://saibariftozbjrxsfnga.supabase.co';
+const SUPABASE_KEY='sb_publishable_hy7kRrxC_xqpRK5ZiwhNBg_uGfsaSOG';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{flowType:'pkce'}});
+
+// 앱 시작 시 로그인 상태 확인. 카카오 로그인 후 돌아온 경우(?code=...)에는 여기서 로그인이 완료된다.
+async function initAuth(){
+  const q=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.slice(1));
+  const err=q.get('error_description')||h.get('error_description')||q.get('error')||h.get('error');
+  const justSignedIn=q.has('code');
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    S.loggedIn=!!session;
+    if(session)await loadProfile(session.user.id);
+  }catch(e){S.loggedIn=false;}
+  save();
+  if(justSignedIn||err)history.replaceState(null,'',location.pathname);
+  if(err)setTimeout(()=>toast('카카오 로그인에 실패했어요: '+err),0);
+  else if(justSignedIn&&S.loggedIn)setTimeout(()=>toast(S.user.name+'님, 환영해요'),0);
+  sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT'&&S.loggedIn){S.loggedIn=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();}});
+}
+// 서버의 내 프로필(이름·소개·사진)을 가져온다. 인터넷이 안 되면 저장해 둔 값을 그대로 쓴다.
+async function loadProfile(uid){
+  const {data}=await sb.from('profiles').select('name,bio,avatar_url').eq('id',uid).maybeSingle();
+  if(data)Object.assign(S.user,{name:data.name,bio:data.bio,avatar:data.avatar_url});
+}
+
 async function loadBible(){
   const res=await fetch('data/krv.json');if(!res.ok)throw new Error(res.status);
   const d=await res.json();
@@ -530,7 +559,7 @@ function kakaoCard(head,body,btn){return '<div class="kcard"><div class="kc-img"
 
 /* ============ screens ============ */
 const SC={};
-SC.login=()=>'<div class="login"><div class="login-top"><div class="logo">윗블</div><div class="logo-en">WITHBLE</div><p class="tagline">With Bible, With People.</p><p class="tagline-ko">말씀으로 함께하는 우리</p><blockquote class="login-verse">보라 형제가 연합하여 동거함이 어찌 그리 선하고 아름다운고<cite>시편 133:1</cite></blockquote></div><button class="btn btn-kakao block" data-a="login" id="loginBtn">카카오로 시작하기</button><p class="proto-note">Prototype에서는 실제 카카오 로그인 대신 테스트 사용자 ‘미미’로 들어가요.</p></div>';
+SC.login=()=>'<div class="login"><div class="login-top"><div class="logo">윗블</div><div class="logo-en">WITHBLE</div><p class="tagline">With Bible, With People.</p><p class="tagline-ko">말씀으로 함께하는 우리</p><blockquote class="login-verse">보라 형제가 연합하여 동거함이 어찌 그리 선하고 아름다운고<cite>시편 133:1</cite></blockquote></div><button class="btn btn-kakao block" data-a="login" id="loginBtn">카카오로 시작하기</button><p class="proto-note">카카오 계정의 닉네임과 프로필 사진(선택)만 받아요.</p></div>';
 
 SC.home=()=>{
   const lr=S.lastRead,lb=BOOKS[lr.b];
@@ -813,8 +842,11 @@ function copy(text,msg){const ok=()=>toast(msg||'링크를 복사했어요');try
 
 /* ============ actions ============ */
 const A={
-  login(d,el){el.disabled=true;el.textContent='카카오 계정 확인 중…';setTimeout(()=>{S.loggedIn=true;save();UI.tab='home';UI.stack=[{name:'home'}];render();toast(S.user.name+'님, 환영해요 ');},700);},
-  logout(){confirmModal('로그아웃할까요?','기록은 이 브라우저에 그대로 남아 있어요.','로그아웃',()=>{S.loggedIn=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();toast('로그아웃했어요');},'primary');},
+  async login(d,el){el.disabled=true;el.textContent='카카오로 이동 중…';
+    const {error}=await sb.auth.signInWithOAuth({provider:'kakao',options:{redirectTo:location.origin}});
+    if(error){el.disabled=false;el.textContent='카카오로 시작하기';toast('로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요');}
+  },
+  logout(){confirmModal('로그아웃할까요?','기록은 이 브라우저에 그대로 남아 있어요.','로그아웃',async()=>{await sb.auth.signOut().catch(()=>{});S.loggedIn=false;save();UI.stack=[{name:'home'}];UI.tab='home';render();toast('로그아웃했어요');},'primary');},
   tab(d){tab(d.t);},
   back(){back();},
   closeModal(){closeModal();},
@@ -926,7 +958,7 @@ const A={
   serviceInfo(){modal({title:'윗블 Withble',body:'<p>With Bible, With People.<br>말씀으로 함께하는 우리</p><p class="muted" style="margin-top:10px;font-size:14px">프로토타입 v0.1 · 성경 본문 개역한글(66권 전체)<br>모든 기록은 이 브라우저에만 저장되며, 카카오 로그인·공유·초대는 시뮬레이션이에요.</p>',actions:[{label:'닫기',kind:'primary'}]});},
   editProfile(){modal({title:'프로필 편집',body:'<div class="field" style="margin-top:6px"><label for="pfName">이름</label><input class="input" id="pfName" maxlength="12" value="'+esc(S.user.name)+'"></div><div class="field"><label for="pfBio">한 줄 소개</label><input class="input" id="pfBio" maxlength="30" value="'+esc(S.user.bio)+'"></div>',
     actions:[{label:'취소'},{label:'저장',kind:'primary',fn:()=>{const n=$('#pfName').value.trim();if(!n){toast('이름을 적어주세요');return false;}S.user.name=n;S.user.bio=$('#pfBio').value.trim()||'말씀으로 함께 걷는 중 ';save();render(false);toast('프로필을 저장했어요');}}]});},
-  resetAll(){confirmModal('테스트 데이터를 초기화할까요?','작성한 묵상·기도·모임이 모두 지워지고 처음 상태로 돌아가요.','초기화',()=>{try{localStorage.removeItem(LS);}catch(e){}S=seed();save();Object.assign(UI,{stack:[{name:'home'}],tab:'home',recTab:'med',pf:'all',gTab:'home',gpf:'all',q:'',invited:false});UI.sel.clear();render();toast('테스트 데이터를 초기화했어요');});},
+  resetAll(){confirmModal('테스트 데이터를 초기화할까요?','작성한 묵상·기도·모임이 모두 지워지고 처음 상태로 돌아가요.','초기화',()=>{try{localStorage.removeItem(LS);}catch(e){}const li=S.loggedIn;S=seed();S.loggedIn=li;save();Object.assign(UI,{stack:[{name:'home'}],tab:'home',recTab:'med',pf:'all',gTab:'home',gpf:'all',q:'',invited:false});UI.sel.clear();render();toast('테스트 데이터를 초기화했어요');});},
 };
 function mockJoin(g){
   const pool=['재문','영희','민수','지은','하늘'].filter(n=>!g.members.some(m=>m.name===n));
@@ -965,7 +997,7 @@ window.addEventListener('appinstalled',()=>{installEvt=null;});
 const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 load();
 $('#app').innerHTML='<div class="empty"><h4>성경 본문을 불러오는 중이에요</h4></div>';
-loadBible().then(render).catch(()=>{
+Promise.all([loadBible(),initAuth()]).then(()=>render()).catch(()=>{
   $('#app').innerHTML='<div class="empty"><h4>성경 본문을 불러오지 못했어요</h4><p>파일을 더블클릭해서 열면 본문을 읽을 수 없어요.<br>터미널에서 <b>python3 -m http.server 8000</b> 실행 후<br><b>http://localhost:8000</b> 으로 열어주세요.</p></div>';
 });
 </script>
